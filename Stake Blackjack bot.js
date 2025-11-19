@@ -840,10 +840,14 @@
     _currentBetEl: null,
     _totalWinEl: null,
     _wagerCountEl: null,
+    _reloadCountEl: null,
     _targetHands: 0, // 0 = unlimited
     _targetWager: 0, // 0 = unlimited
     _playedHands: 0,
     _handTimestamps: [], // Track timestamps for hands/sec calculation
+    _continuationEnabled: false,
+    _reloadCount: 0,
+    _handStartTime: null, // Track when current hand started
 
     _emit(msg){ console.log(msg); if (this._statusEl) this._statusEl.textContent = msg.replace(/^\[SBJ\]\s*/,''); },
     _updateHandCounter() {
@@ -923,6 +927,67 @@
         this._wagerCountEl.textContent = `$${totalWagered.toFixed(2)}/∞`;
       }
     },
+    _updateReloadCounter() {
+      if (!this._reloadCountEl) return;
+      this._reloadCountEl.textContent = `Reloads: ${this._reloadCount}`;
+    },
+    _saveState() {
+      const state = {
+        runningStats: runningStats,
+        targetHands: this._targetHands,
+        targetWager: this._targetWager,
+        playedHands: this._playedHands,
+        reloadCount: this._reloadCount,
+        continuationEnabled: this._continuationEnabled,
+        timestamp: Date.now()
+      };
+      localStorage.setItem('sbj-continuation-state', JSON.stringify(state));
+      console.log('[SBJ] State saved for continuation');
+    },
+    _loadState() {
+      const saved = localStorage.getItem('sbj-continuation-state');
+      if (!saved) return false;
+
+      try {
+        const state = JSON.parse(saved);
+
+        // Restore running stats
+        runningStats.totalWins = state.runningStats.totalWins;
+        runningStats.totalLosses = state.runningStats.totalLosses;
+        runningStats.totalPushes = state.runningStats.totalPushes;
+        runningStats.totalHands = state.runningStats.totalHands;
+        runningStats.totalBet = state.runningStats.totalBet;
+        runningStats.totalWon = state.runningStats.totalWon;
+
+        // Restore settings
+        this._targetHands = state.targetHands;
+        this._targetWager = state.targetWager;
+        this._playedHands = state.playedHands;
+        this._reloadCount = state.reloadCount + 1; // Increment reload count
+        this._continuationEnabled = state.continuationEnabled;
+
+        console.log('[SBJ] State restored from continuation');
+        return true;
+      } catch (err) {
+        console.log('[SBJ] Failed to restore state:', err);
+        return false;
+      }
+    },
+    _clearState() {
+      localStorage.removeItem('sbj-continuation-state');
+      console.log('[SBJ] Continuation state cleared');
+    },
+    _triggerReload() {
+      if (!this._continuationEnabled) {
+        this._emit('[SBJ] Hand timeout - continuation disabled');
+        this.stop();
+        return;
+      }
+
+      this._emit('[SBJ] Hand timeout - reloading page...');
+      this._saveState();
+      setTimeout(() => location.reload(), 1000); // Small delay for save to complete
+    },
     last() { return _lastBJRaw; },
 
     async _wait(ms){ return sleep(ms); },
@@ -995,11 +1060,20 @@
       return readServer();
     },
 
+    _checkHandTimeout() {
+      if (!this._handStartTime) return false;
+      const elapsed = Date.now() - this._handStartTime;
+      return elapsed > 30000; // 30 seconds
+    },
+
     async _playOneHand() {
       this._emit('[SBJ] Starting hand sequence...');
 
       // Reset deduplication for new hand
       this._lastKeyActed = null;
+
+      // Track hand start time for timeout detection
+      this._handStartTime = Date.now();
 
       // Step 1: Start a new hand if Play button is visible
       const playVisible = !!q(SELECTORS.playBtn);
@@ -1087,6 +1161,13 @@
       this._emit('[SBJ] Starting game decisions...');
       for (let safety = 0; safety < 50; safety++) {
         await this._wait(30); // Reduced for faster play
+
+        // Check for hand timeout
+        if (this._checkHandTimeout()) {
+          this._emit('[SBJ] Hand timeout - 30 seconds exceeded');
+          this._triggerReload();
+          return;
+        }
 
         // Always get fresh data
         let v = readServer();
@@ -1601,7 +1682,35 @@
       }, 3000);
     };
 
-    controlsRow.append(handCountContainer, wagerCountContainer, btnStart, btnStop, btnOnce, btnLog, btnTest);
+    // Continuation cycle container
+    const continuationContainer = document.createElement('div');
+    continuationContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+    const continuationCheckbox = document.createElement('input');
+    continuationCheckbox.type = 'checkbox';
+    continuationCheckbox.id = 'sbj-continuation';
+    continuationCheckbox.checked = SBJ._continuationEnabled;
+    continuationCheckbox.style.cssText = 'cursor: pointer;';
+    continuationCheckbox.onchange = (e) => {
+      SBJ._continuationEnabled = e.target.checked;
+      if (!e.target.checked) {
+        SBJ._clearState(); // Clear saved state when disabled
+      }
+    };
+
+    const continuationLabel = document.createElement('label');
+    continuationLabel.htmlFor = 'sbj-continuation';
+    continuationLabel.textContent = 'Continuation Cycle';
+    continuationLabel.style.cssText = 'font-size: 11px; color: #94a3b8; cursor: pointer;';
+
+    const reloadCounter = document.createElement('span');
+    reloadCounter.textContent = 'Reloads: 0';
+    reloadCounter.style.cssText = 'font-size: 11px; color: #f97316; font-weight: 700; min-width: 75px; text-align: center;';
+    SBJ._reloadCountEl = reloadCounter;
+
+    continuationContainer.append(continuationCheckbox, continuationLabel, reloadCounter);
+
+    controlsRow.append(handCountContainer, wagerCountContainer, continuationContainer, btnStart, btnStop, btnOnce, btnLog, btnTest);
 
     box.append(statusRow, controlsRow);
     document.documentElement.appendChild(box);
@@ -1627,10 +1736,49 @@
     console.log('[SBJ] Animations nuked for maximum speed');
   }
 
+  // Auto-resume after reload if continuation is enabled
+  async function autoResume() {
+    if (!location.pathname.startsWith('/casino/games/blackjack')) return;
+
+    // Try to load saved state
+    const restored = SBJ._loadState();
+    if (!restored || !SBJ._continuationEnabled) return;
+
+    console.log('[SBJ] Continuation state restored, waiting to auto-start...');
+
+    // Update all UI displays
+    SBJ._updateHandCounter();
+    SBJ._updateWagerCounter();
+    SBJ._updateTotalWin();
+    SBJ._updateReloadCounter();
+
+    // Update checkbox to match restored state
+    const checkbox = document.getElementById('sbj-continuation');
+    if (checkbox) checkbox.checked = true;
+
+    // Wait for page to be ready (play/deal button visible)
+    let attempts = 0;
+    while (attempts < 50) {
+      await sleep(200);
+      const playBtn = q(SELECTORS.playBtn);
+      const dealBtn = q(SELECTORS.dealBtn);
+      if (playBtn || dealBtn) {
+        console.log('[SBJ] Page ready, auto-starting...');
+        await sleep(1000); // Extra delay for stability
+        SBJ.start();
+        return;
+      }
+      attempts++;
+    }
+
+    console.log('[SBJ] Timeout waiting for page ready, auto-start aborted');
+  }
+
   const ro = new MutationObserver(() => {
     if (location.pathname.startsWith('/casino/games/blackjack')) {
       nukeAnimations();
       mountPanel();
+      autoResume();
     }
   });
   ro.observe(document.documentElement, {childList:true, subtree:true});
@@ -1638,6 +1786,7 @@
     if (location.pathname.startsWith('/casino/games/blackjack')) {
       nukeAnimations();
       mountPanel();
+      autoResume();
     }
   });
 
