@@ -2,6 +2,7 @@
 // @name         NODEZ STAKE WEB BJ 2.0
 // @namespace    stake-bj
 // @version      2.0
+// @author       @kaika
 // @match        https://stake.us/casino/games/blackjack*
 // @run-at       document-start
 // @inject-into  page
@@ -10,6 +11,7 @@
 
 /*
  * NODEZ STAKE WEB BJ 2.0
+ * by @kaika
  *
  * FREE SOFTWARE LICENSE
  *
