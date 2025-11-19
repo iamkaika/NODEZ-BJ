@@ -169,24 +169,26 @@
         winAmount = totalWinAmount;
         console.log('[SBJ DEBUG] Split total winAmount:', winAmount, 'vs total bet:', betAmount);
       } else if (result === 'win') {
-        // Try to use actual payout if available, otherwise estimate
-        if (payout > 0) {
-          winAmount = payout;
-        } else if (profit > 0) {
-          winAmount = betAmount + profit; // bet + profit = total returned
+        // Calculate payout ourselves (don't trust API payout field)
+        // Check for blackjack: 21 with exactly 2 cards and no actions (no hits/doubles)
+        const hasNoActions = !currentHand.actions || currentHand.actions.length === 0 ||
+                              (currentHand.actions.length === 1 && currentHand.actions[0].action === 'stand');
+        const hasTwoCards = currentHand.playerStart && currentHand.playerStart.split(',').length === 2;
+        const isBlackjack = (finalPlayerTotal === 21) && hasTwoCards && hasNoActions;
+
+        if (isBlackjack) {
+          winAmount = betAmount * 2.5; // 3:2 payout
+          console.log('[SBJ DEBUG] Blackjack win - bet:', betAmount, 'winAmount:', winAmount, 'cards:', currentHand.playerStart);
         } else {
-          // Fallback estimation - check for blackjack
-          const isBlackjack = (finalPlayerTotal === 21) && (currentHand.playerStart.split(',').length === 2);
-          if (isBlackjack) {
-            winAmount = betAmount * 2.5; // 3:2 payout
-          } else {
-            winAmount = betAmount * 2; // 1:1 payout
-          }
+          winAmount = betAmount * 2; // 1:1 payout
+          console.log('[SBJ DEBUG] Regular win - bet:', betAmount, 'winAmount:', winAmount);
         }
       } else if (result === 'push') {
         winAmount = betAmount; // Get bet back
+        console.log('[SBJ DEBUG] Push - bet:', betAmount, 'winAmount:', winAmount);
       } else {
         winAmount = 0; // Lose everything
+        console.log('[SBJ DEBUG] Loss - bet:', betAmount, 'winAmount:', winAmount);
       }
 
       currentHand.winAmount = winAmount;
@@ -203,6 +205,12 @@
       // Update running totals for money-based RTP using the final bet amount
       runningStats.totalBet += actualBetAmount;
       runningStats.totalWon += winAmount;
+
+      // Update total win display
+      SBJ._updateTotalWin();
+
+      // Update wager counter
+      SBJ._updateWagerCounter();
 
       // Update hand counts (keep for reference)
       if (result === 'win') runningStats.totalWins++;
@@ -538,7 +546,7 @@
       "8":{"2":"H","3":"H","4":"H","5":"H","6":"H","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "9":{"2":"H","3":"D","4":"D","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "10":{"2":"D","3":"D","4":"D","5":"D","6":"D","7":"D","8":"D","9":"D","10":"H","A":"H"},
-      "11":{"2":"D","3":"D","4":"D","5":"D","6":"D","7":"D","8":"D","9":"D","10":"D","A":"H"},
+      "11":{"2":"D","3":"D","4":"D","5":"D","6":"D","7":"D","8":"D","9":"D","10":"D","A":"D"},
       "12":{"2":"H","3":"H","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "13":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "14":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
@@ -828,8 +836,14 @@
     _lastKeyActed: null,
     _statusEl: null,
     _handCountEl: null,
+    _handsPerSecEl: null,
+    _currentBetEl: null,
+    _totalWinEl: null,
+    _wagerCountEl: null,
     _targetHands: 0, // 0 = unlimited
+    _targetWager: 0, // 0 = unlimited
     _playedHands: 0,
+    _handTimestamps: [], // Track timestamps for hands/sec calculation
 
     _emit(msg){ console.log(msg); if (this._statusEl) this._statusEl.textContent = msg.replace(/^\[SBJ\]\s*/,''); },
     _updateHandCounter() {
@@ -839,6 +853,74 @@
         } else {
           this._handCountEl.textContent = `${this._playedHands}/∞`;
         }
+      }
+    },
+    _updateHandsPerSec() {
+      if (!this._handsPerSecEl) return;
+
+      const now = Date.now();
+      this._handTimestamps.push(now);
+
+      // Keep only last 20 hands for calculation
+      if (this._handTimestamps.length > 20) {
+        this._handTimestamps = this._handTimestamps.slice(-20);
+      }
+
+      // Need at least 2 hands to calculate rate
+      if (this._handTimestamps.length < 2) {
+        this._handsPerSecEl.textContent = '-- h/s';
+        return;
+      }
+
+      // Calculate hands per second based on last 10 hands (or all if less than 10)
+      const recentCount = Math.min(10, this._handTimestamps.length);
+      const recentTimestamps = this._handTimestamps.slice(-recentCount);
+      const timeSpan = recentTimestamps[recentTimestamps.length - 1] - recentTimestamps[0];
+
+      // Safety check: prevent division by zero or very small numbers
+      if (timeSpan < 100) {
+        // If less than 100ms elapsed, not enough data yet
+        this._handsPerSecEl.textContent = '-- h/s';
+        return;
+      }
+
+      const handsPerSec = (recentCount - 1) / (timeSpan / 1000);
+
+      // Safety check: cap at reasonable max (no more than 10 hands/sec)
+      if (handsPerSec > 10 || !isFinite(handsPerSec)) {
+        this._handsPerSecEl.textContent = '-- h/s';
+        return;
+      }
+
+      this._handsPerSecEl.textContent = `${handsPerSec.toFixed(2)} h/s`;
+    },
+    _updateCurrentBet() {
+      if (!this._currentBetEl) return;
+
+      const betAmount = getBetAmountFromUI();
+      if (betAmount !== null) {
+        this._currentBetEl.textContent = `Bet: $${betAmount.toFixed(2)}`;
+      } else {
+        this._currentBetEl.textContent = 'Bet: --';
+      }
+    },
+    _updateTotalWin() {
+      if (!this._totalWinEl) return;
+
+      const netGain = runningStats.totalWon - runningStats.totalBet;
+      const color = netGain >= 0 ? '#4ade80' : '#f87171'; // green if positive, red if negative
+      this._totalWinEl.style.color = color;
+      this._totalWinEl.textContent = `Win: $${netGain.toFixed(2)}`;
+    },
+    _updateWagerCounter() {
+      if (!this._wagerCountEl) return;
+
+      const totalWagered = runningStats.totalBet;
+
+      if (this._targetWager > 0) {
+        this._wagerCountEl.textContent = `$${totalWagered.toFixed(2)}/$${this._targetWager.toFixed(2)}`;
+      } else {
+        this._wagerCountEl.textContent = `$${totalWagered.toFixed(2)}/∞`;
       }
     },
     last() { return _lastBJRaw; },
@@ -935,7 +1017,7 @@
       this._emit('[SBJ] Waiting for cards to be dealt...');
       let dealWaitAttempts = 0;
       while (dealWaitAttempts < 30) {
-        await this._wait(200);
+        await this._wait(100);
         let btnActs = getAvailableActions();
         let v = readServer();
 
@@ -994,7 +1076,7 @@
         if (btnActs.includes('deal')) {
           this._emit(`[SBJ] Sending deal (attempt ${dealWaitAttempts + 1})...`);
           if (await clickAction('deal')) {
-            await this._wait(500);
+            await this._wait(200);
           }
         }
 
@@ -1029,7 +1111,7 @@
 
           if (await clickAction(action)) {
             if (v) this._lastKeyActed = v.stateKey;
-            await this._waitForProgress(this._lastKeyActed, 500); // Reduced for faster play
+            await this._waitForProgress(this._lastKeyActed, 200);
           }
           continue;
         }
@@ -1038,11 +1120,11 @@
         if (btnActs.length === 1 && btnActs[0] === 'deal') {
           this._emit('[SBJ] Only deal available, clicking and waiting...');
           if (await clickAction('deal')) {
-            await this._wait(800); // Longer wait for dealing to complete
+            await this._wait(400);
 
             // Wait for non-deal actions to appear
             for (let waitCount = 0; waitCount < 20; waitCount++) {
-              await this._wait(100);
+              await this._wait(50);
               const newActions = getAvailableActions();
               const nonDealActions = newActions.filter(a => a !== 'deal');
               if (nonDealActions.length > 0) {
@@ -1054,7 +1136,34 @@
           continue;
         }
 
-        // Handle main game actions
+        // CRITICAL FIX: On 2-card hands, wait for double button if it should be available
+        // This prevents race conditions where double button hasn't rendered yet
+        if (v && v.cardsRanks.length === 2 && !btnActs.includes('double')) {
+          // Check if this is a hand that should have double available
+          // Double is typically available on all 2-card hands (unless blackjack or special rules)
+          const shouldHaveDouble = v.total !== 21; // Not blackjack
+
+          if (shouldHaveDouble) {
+            // Wait a bit longer for double button to appear
+            let foundDouble = false;
+            for (let doubleWait = 0; doubleWait < 5; doubleWait++) {
+              await this._wait(50);
+              const freshActions = getAvailableActions();
+              if (freshActions.includes('double')) {
+                btnActs = freshActions;
+                foundDouble = true;
+                console.log('[SBJ DEBUG] Double button appeared after waiting');
+                break;
+              }
+            }
+
+            if (!foundDouble) {
+              console.log('[SBJ DEBUG] Warning: Expected double button on 2-card hand but not found. Total:', v.total);
+            }
+          }
+        }
+
+        // Handle main game actions (calculate after potentially updating btnActs)
         const gameActions = btnActs.filter(a => ['hit','stand','double','split'].includes(a));
 
         if (gameActions.length === 0) {
@@ -1068,7 +1177,7 @@
             this._emit('[SBJ] Timeout waiting for game actions');
             break;
           }
-          await this._wait(200);
+          await this._wait(100);
           continue;
         }
 
@@ -1077,21 +1186,21 @@
         if (!currentState) {
           this._emit('[SBJ] No server state available');
           console.log('[SBJ DEBUG] readServer() returned null');
-          await this._wait(200);
+          await this._wait(100);
           continue;
         }
 
         if (!currentState.upRank) {
           this._emit('[SBJ] Missing dealer upcard');
           console.log('[SBJ DEBUG] Server state:', {total: currentState.total, cards: currentState.cardsRanks, upRank: currentState.upRank, actions: currentState.actions});
-          await this._wait(200);
+          await this._wait(100);
           continue;
         }
 
         if (currentState.cardsRanks.length < 2) {
           this._emit('[SBJ] Incomplete hand - only ' + currentState.cardsRanks.length + ' cards');
           console.log('[SBJ DEBUG] Server state:', {total: currentState.total, cards: currentState.cardsRanks, upRank: currentState.upRank, actions: currentState.actions});
-          await this._wait(200);
+          await this._wait(100);
           continue;
         }
 
@@ -1129,7 +1238,7 @@
           this._emit('[SBJ] Same state detected, waiting for actual change...');
 
           // For hit actions, we need to wait for cards to actually change
-          await this._wait(500); // Give server time to process
+          await this._wait(200); // Give server time to process
           const updated = readServer();
 
           if (updated && (updated.total !== v.total || updated.cardsRanks.length !== v.cardsRanks.length)) {
@@ -1192,7 +1301,7 @@
 
         if (!decide || !gameActions.includes(decide)) {
           this._emit('[SBJ] No valid decision available');
-          await this._wait(200);
+          await this._wait(100);
           continue;
         }
 
@@ -1215,7 +1324,7 @@
 
           if (gotUpdate) {
             // Reduced wait time for state to update
-            await this._wait(50); // Reduced for faster play
+            await this._wait(20);
             const newState = readServer();
             if (newState && (newState.total !== v.total || newState.cardsRanks.length !== v.cardsRanks.length)) {
               this._emit(`[SBJ] State updated: ${v.total} → ${newState.total}, ${v.cardsRanks.length} → ${newState.cardsRanks.length} cards`);
@@ -1313,8 +1422,10 @@
       if (this._running) return;
       this._running = true;
       this._playedHands = 0;
+      this._handTimestamps = []; // Reset timestamps
       this._emit('[SBJ] START');
       this._updateHandCounter();
+      this._updateCurrentBet(); // Update bet display at start
 
       while (this._running) {
         // Check if we've reached the target hand count
@@ -1323,22 +1434,28 @@
           break;
         }
 
+        // Check if we've reached the target wager amount
+        if (this._targetWager > 0 && runningStats.totalBet >= this._targetWager) {
+          this._emit('[SBJ] Target wager reached!');
+          break;
+        }
+
         this._playedHands++;
         console.log(`[SBJ DEBUG] Starting hand #${this._playedHands}`);
         this._updateHandCounter();
+        this._updateCurrentBet(); // Update bet display before each hand
 
         try {
           await this.playOnce();
           console.log(`[SBJ DEBUG] Completed hand #${this._playedHands}`);
+          this._updateHandsPerSec(); // Update hands/sec after each hand
         } catch (error) {
           console.log(`[SBJ DEBUG] Error in hand #${this._playedHands}:`, error);
           this._emit(`[SBJ] Error in hand: ${error.message}`);
         }
 
-        // FIXED: Better pause between hands with running check
-        for (let i=0; i<3 && this._running; i++) { // Reduced for faster play
-          await this._wait(40); // Reduced for faster play
-        }
+        // Minimal pause between hands for maximum speed
+        await this._wait(20);
       }
       this._running = false;
       this._emit('[SBJ] STOP');
@@ -1359,13 +1476,39 @@
       position: fixed; z-index: 2147483647; bottom: 16px; right: 16px;
       background: rgba(0,0,0,.7); color: #fff; font: 12px/1.2 system-ui, sans-serif;
       padding: 10px 12px; border-radius: 10px; backdrop-filter: blur(6px);
-      display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.35);
-      flex-wrap: wrap; max-width: 500px;
+      display: flex; flex-direction: column; gap: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+      max-width: 500px;
     `;
+
+    // Top row: Status and hands per second
+    const statusRow = document.createElement('div');
+    statusRow.style.cssText = 'display: flex; align-items: center; gap: 12px; justify-content: space-between;';
+
     const status = document.createElement('span');
     status.textContent = 'Idle';
-    status.style.minWidth = '160px';
+    status.style.cssText = 'min-width: 160px; flex: 1;';
     SBJ._statusEl = status;
+
+    const currentBet = document.createElement('span');
+    currentBet.textContent = 'Bet: --';
+    currentBet.style.cssText = 'font-size: 11px; color: #4ade80; font-weight: 700; min-width: 70px; text-align: center;';
+    SBJ._currentBetEl = currentBet;
+
+    const totalWin = document.createElement('span');
+    totalWin.textContent = 'Win: $0.00';
+    totalWin.style.cssText = 'font-size: 11px; color: #4ade80; font-weight: 700; min-width: 85px; text-align: center;';
+    SBJ._totalWinEl = totalWin;
+
+    const handsPerSec = document.createElement('span');
+    handsPerSec.textContent = '-- h/s';
+    handsPerSec.style.cssText = 'font-size: 11px; color: #a78bfa; font-weight: 700; min-width: 55px; text-align: right;';
+    SBJ._handsPerSecEl = handsPerSec;
+
+    statusRow.append(status, currentBet, totalWin, handsPerSec);
+
+    // Bottom row: Controls
+    const controlsRow = document.createElement('div');
+    controlsRow.style.cssText = 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;';
 
     // Hand count controls container
     const handCountContainer = document.createElement('div');
@@ -1394,29 +1537,57 @@
 
     handCountContainer.append(handCountLabel, handCountInput, handCounter);
 
+    // Wager count controls container
+    const wagerCountContainer = document.createElement('div');
+    wagerCountContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+    const wagerCountLabel = document.createElement('span');
+    wagerCountLabel.textContent = 'Wager:';
+    wagerCountLabel.style.cssText = 'font-size: 11px; color: #94a3b8;';
+
+    const wagerCountInput = document.createElement('input');
+    wagerCountInput.type = 'number';
+    wagerCountInput.placeholder = '∞';
+    wagerCountInput.min = '0';
+    wagerCountInput.step = '1';
+    wagerCountInput.value = '0';
+    wagerCountInput.style.cssText = 'width: 60px; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #374151; border-radius: 4px; padding: 4px 6px; font-size: 11px;';
+    wagerCountInput.onchange = (e) => {
+      const val = parseFloat(e.target.value) || 0;
+      SBJ._targetWager = val;
+      SBJ._updateWagerCounter();
+    };
+
+    const wagerCounter = document.createElement('span');
+    wagerCounter.textContent = '$0.00/∞';
+    wagerCounter.style.cssText = 'font-size: 11px; color: #fbbf24; font-weight: 700; min-width: 110px; text-align: center;';
+    SBJ._wagerCountEl = wagerCounter;
+
+    wagerCountContainer.append(wagerCountLabel, wagerCountInput, wagerCounter);
+
     const btnStart = document.createElement('button');
     btnStart.textContent = 'Start';
-    btnStart.style.cssText = 'background:#16a34a;color:#000;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;';
+    btnStart.style.cssText = 'background:#16a34a;color:#000;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnStart.onclick = ()=>SBJ.start();
 
     const btnStop = document.createElement('button');
     btnStop.textContent = 'Stop';
-    btnStop.style.cssText = 'background:#ef4444;color:#fff;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;';
+    btnStop.style.cssText = 'background:#ef4444;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnStop.onclick = ()=>SBJ.stop();
 
     const btnOnce = document.createElement('button');
     btnOnce.textContent = 'Play Once';
-    btnOnce.style.cssText = 'background:#22d3ee;color:#003;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;';
+    btnOnce.style.cssText = 'background:#22d3ee;color:#003;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnOnce.onclick = ()=>SBJ.playOnce();
 
     const btnLog = document.createElement('button');
     btnLog.textContent = 'History';
-    btnLog.style.cssText = 'background:#6366f1;color:#fff;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;';
+    btnLog.style.cssText = 'background:#6366f1;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnLog.onclick = () => toggleLogWindow();
 
     const btnTest = document.createElement('button');
     btnTest.textContent = 'Run Tests';
-    btnTest.style.cssText = 'background:#f59e0b;color:#000;border:none;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer;';
+    btnTest.style.cssText = 'background:#f59e0b;color:#000;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnTest.onclick = async () => {
       btnTest.disabled = true;
       btnTest.textContent = 'Testing...';
@@ -1430,16 +1601,44 @@
       }, 3000);
     };
 
-    box.append(status, handCountContainer, btnStart, btnStop, btnOnce, btnLog, btnTest);
+    controlsRow.append(handCountContainer, wagerCountContainer, btnStart, btnStop, btnOnce, btnLog, btnTest);
+
+    box.append(statusRow, controlsRow);
     document.documentElement.appendChild(box);
   }
 
+  // Nuclear option: Kill all animations and transitions for maximum speed
+  function nukeAnimations() {
+    if (document.getElementById('sbj-no-animations')) return; // Already injected
+
+    const style = document.createElement('style');
+    style.id = 'sbj-no-animations';
+    style.textContent = `
+      * {
+        animation: none !important;
+        animation-duration: 0s !important;
+        animation-delay: 0s !important;
+        transition: none !important;
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+      }
+    `;
+    document.head.appendChild(style);
+    console.log('[SBJ] Animations nuked for maximum speed');
+  }
+
   const ro = new MutationObserver(() => {
-    if (location.pathname.startsWith('/casino/games/blackjack')) mountPanel();
+    if (location.pathname.startsWith('/casino/games/blackjack')) {
+      nukeAnimations();
+      mountPanel();
+    }
   });
   ro.observe(document.documentElement, {childList:true, subtree:true});
   window.addEventListener('DOMContentLoaded', () => {
-    if (location.pathname.startsWith('/casino/games/blackjack')) mountPanel();
+    if (location.pathname.startsWith('/casino/games/blackjack')) {
+      nukeAnimations();
+      mountPanel();
+    }
   });
 
   // --------------------------- TEST SUITE ---------------------------
@@ -1853,6 +2052,83 @@
     TestSuite.assertEqual(runningStats.totalBet, 10.00, 'Total bet should be 10.00');
     TestSuite.assertEqual(runningStats.totalWon, 10.00, 'Total won should be 10.00');
     TestSuite.assertClose(rtp, 100.0, 0.1, 'RTP should be 100%');
+  });
+
+  // Test: Wager Tracking - Basic bet
+  TestSuite.test('Wager Tracking - Basic bet tracked correctly', () => {
+    const betAmount = 0.50;
+    startNewHand(['J', '8'], 'K', betAmount);
+    logAction('stand', ['J', '8'], 18, false);
+
+    const mockState = TestSuite.mockGameState({
+      betAmount: betAmount,
+      playerHands: [{ value: 18, cards: [{rank:'J'},{rank:'8'}], actions: ['stand'] }],
+      dealer: { value: 17, cards: [{rank:'K'},{rank:'7'}] }
+    });
+    _lastBJRaw = mockState;
+
+    finishHand('win', 18, 17);
+
+    TestSuite.assertEqual(runningStats.totalBet, 0.50, 'Total wager should be 0.50');
+  });
+
+  // Test: Wager Tracking - Double down
+  TestSuite.test('Wager Tracking - Double down wager tracked correctly', () => {
+    const betAmount = 0.50;
+    startNewHand(['5', '6'], '5', betAmount);
+    logAction('double', ['5', '6', 'K'], 21, false);
+
+    const mockState = TestSuite.mockGameState({
+      betAmount: betAmount * 2,
+      playerHands: [{ value: 21, cards: [{rank:'5'},{rank:'6'},{rank:'K'}], actions: ['double'] }],
+      dealer: { value: 20, cards: [{rank:'5'},{rank:'K'},{rank:'5'}] }
+    });
+    _lastBJRaw = mockState;
+
+    finishHand('win', 21, 20);
+
+    TestSuite.assertEqual(runningStats.totalBet, 1.00, 'Total wager should be 1.00 (doubled)');
+  });
+
+  // Test: Wager Tracking - Split
+  TestSuite.test('Wager Tracking - Split wager tracked correctly', () => {
+    const betAmount = 0.50;
+    startNewHand(['8', '8'], '6', betAmount);
+    logAction('split', ['8', '8'], 16, false);
+
+    const mockState = TestSuite.mockGameState({
+      betAmount: betAmount * 2,
+      playerHands: [
+        { value: 18, cards: [{rank:'8'},{rank:'10'}], actions: ['split'] },
+        { value: 19, cards: [{rank:'8'},{rank:'A'}], actions: [] }
+      ],
+      dealer: { value: 20, cards: [{rank:'6'},{rank:'K'},{rank:'4'}] }
+    });
+    _lastBJRaw = mockState;
+
+    finishHand('loss', 18, 20);
+
+    TestSuite.assertEqual(runningStats.totalBet, 1.00, 'Total wager should be 1.00 (split = 2x bet)');
+  });
+
+  // Test: Wager Tracking - Multiple hands cumulative
+  TestSuite.test('Wager Tracking - Multiple hands accumulate correctly', () => {
+    // Hand 1: $0.50 bet
+    startNewHand(['K', '9'], '7', 0.50);
+    logAction('stand', ['K', '9'], 19, false);
+    finishHand('win', 19, 18);
+
+    // Hand 2: $1.00 bet with double = $2.00 total
+    startNewHand(['5', '6'], '5', 1.00);
+    logAction('double', ['5', '6', 'K'], 21, false);
+    finishHand('win', 21, 20);
+
+    // Hand 3: $0.25 bet with split = $0.50 total
+    startNewHand(['8', '8'], '6', 0.25);
+    logAction('split', ['8', '8'], 16, false);
+    finishHand('loss', 18, 20);
+
+    TestSuite.assertClose(runningStats.totalBet, 3.00, 0.01, 'Total wager should be ~3.00 (0.50 + 2.00 + 0.50)');
   });
 
   // Expose test suite
