@@ -1767,15 +1767,19 @@
     document.head.appendChild(style);
 
     // Override inline styles on card backs with JavaScript
-    const cardBackSVGClean = cardBackSVG.replace(/^data:image\/svg\+xml,/, '');
-    const observer = new MutationObserver(() => {
+    const applyCustomCardBacks = () => {
       document.querySelectorAll('.back').forEach(el => {
-        if (el.style.backgroundImage && !el.style.backgroundImage.includes('data:image')) {
-          el.style.backgroundImage = `url('data:image/svg+xml,${cardBackSVGClean}')`;
-        }
+        el.style.setProperty('background-image', `url('${cardBackSVG}')`, 'important');
       });
-    });
+    };
+
+    // Apply immediately and watch for new cards
+    applyCustomCardBacks();
+    const observer = new MutationObserver(applyCustomCardBacks);
     observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    // Also reapply periodically to catch any missed cards
+    setInterval(applyCustomCardBacks, 500);
 
     console.log('[SBJ] Animations nuked for maximum speed');
   }
