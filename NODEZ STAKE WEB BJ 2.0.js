@@ -1754,9 +1754,14 @@
         transition-delay: 0s !important;
       }
       /* Custom NODEZ card back */
-      .back {
+      .back,
+      .back.svelte-yspm2z,
+      div.back,
+      div[class*="back"] {
         background-image: url('${cardBackSVG}') !important;
         background-size: cover !important;
+        background-position: center !important;
+        background-repeat: no-repeat !important;
       }
     `;
     document.head.appendChild(style);
