@@ -1783,7 +1783,7 @@
     if (location.pathname.startsWith('/casino/games/blackjack')) {
       // nukeAnimations(); // Temporarily disabled - may cause page load issues on Mac
       mountPanel();
-      autoResume();
+      // autoResume(); // Temporarily disabled - testing if this causes page load issue
     }
   });
   ro.observe(document.documentElement, {childList:true, subtree:true});
@@ -1791,7 +1791,7 @@
     if (location.pathname.startsWith('/casino/games/blackjack')) {
       // nukeAnimations(); // Temporarily disabled - may cause page load issues on Mac
       mountPanel();
-      autoResume();
+      // autoResume(); // Temporarily disabled - testing if this causes page load issue
     }
   });
 
