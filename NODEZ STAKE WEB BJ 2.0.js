@@ -203,9 +203,13 @@
         const hasTwoCards = currentHand.playerStart && currentHand.playerStart.split(',').length === 2;
         const isBlackjack = (finalPlayerTotal === 21) && hasTwoCards && hasNoActions;
 
+        // Detailed logging for blackjack detection
+        console.log('[SBJ DEBUG] BJ Check - total:', finalPlayerTotal, 'cards:', currentHand.playerStart, 'actions:', currentHand.actions?.map(a => a.action).join(',') || 'none');
+        console.log('[SBJ DEBUG] BJ Check - hasTwoCards:', hasTwoCards, 'hasNoActions:', hasNoActions, 'isBlackjack:', isBlackjack);
+
         if (isBlackjack) {
           winAmount = betAmount * 2.5; // 3:2 payout
-          console.log('[SBJ DEBUG] Blackjack win - bet:', betAmount, 'winAmount:', winAmount, 'cards:', currentHand.playerStart);
+          console.log('[SBJ DEBUG] *** BLACKJACK WIN *** - bet:', betAmount, 'winAmount:', winAmount, 'cards:', currentHand.playerStart);
         } else {
           winAmount = betAmount * 2; // 1:1 payout
           console.log('[SBJ DEBUG] Regular win - bet:', betAmount, 'winAmount:', winAmount);
