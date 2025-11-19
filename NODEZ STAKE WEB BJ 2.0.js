@@ -1740,6 +1740,17 @@
         transition-duration: 0s !important;
         transition-delay: 0s !important;
       }
+      /* Skip card flip animations - show cards immediately */
+      .back.face-down {
+        display: none !important;
+        opacity: 0 !important;
+      }
+      .content.face-down .back {
+        display: none !important;
+      }
+      .horizontal {
+        transform: none !important;
+      }
     `;
     document.head.appendChild(style);
     console.log('[SBJ] Animations nuked for maximum speed');
