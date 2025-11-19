@@ -1740,24 +1740,6 @@
         transition-duration: 0s !important;
         transition-delay: 0s !important;
       }
-      /* Skip card flip animations - show cards immediately */
-      .back.face-down,
-      .back {
-        display: none !important;
-        opacity: 0 !important;
-      }
-      .horizontal,
-      .horizontal *,
-      .face,
-      .face-content {
-        transform: none !important;
-        transform-style: flat !important;
-        perspective: none !important;
-      }
-      /* Force cards to show face-up immediately */
-      .content.svelte-yspm2z {
-        transform: rotateY(0deg) !important;
-      }
     `;
     document.head.appendChild(style);
     console.log('[SBJ] Animations nuked for maximum speed');
