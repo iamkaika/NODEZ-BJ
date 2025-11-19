@@ -1666,22 +1666,6 @@
     btnLog.style.cssText = 'background:#6366f1;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnLog.onclick = () => toggleLogWindow();
 
-    const btnTest = document.createElement('button');
-    btnTest.textContent = 'Run Tests';
-    btnTest.style.cssText = 'background:#f59e0b;color:#000;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
-    btnTest.onclick = async () => {
-      btnTest.disabled = true;
-      btnTest.textContent = 'Testing...';
-      const results = await SBJ.runTests();
-      const passed = results.filter(r => r.status === 'PASS').length;
-      const failed = results.filter(r => r.status === 'FAIL').length;
-      btnTest.textContent = `${passed}✓ ${failed}✗`;
-      setTimeout(() => {
-        btnTest.textContent = 'Run Tests';
-        btnTest.disabled = false;
-      }, 3000);
-    };
-
     // Continuation cycle container
     const continuationContainer = document.createElement('div');
     continuationContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
@@ -1710,7 +1694,7 @@
 
     continuationContainer.append(continuationCheckbox, continuationLabel, reloadCounter);
 
-    controlsRow.append(handCountContainer, wagerCountContainer, continuationContainer, btnStart, btnStop, btnOnce, btnLog, btnTest);
+    controlsRow.append(handCountContainer, wagerCountContainer, continuationContainer, btnStart, btnStop, btnOnce, btnLog);
 
     box.append(statusRow, controlsRow);
     document.documentElement.appendChild(box);
