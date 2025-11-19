@@ -1,11 +1,36 @@
 // ==UserScript==
-// @name         Stake Blackjack – Matrix Bot (fixed deal loop)
+// @name         NODEZ STAKE WEB BJ 2.0
 // @namespace    stake-bj
+// @version      2.0
 // @match        https://stake.us/casino/games/blackjack*
 // @run-at       document-start
 // @inject-into  page
 // @grant        none
 // ==/UserScript==
+
+/*
+ * NODEZ STAKE WEB BJ 2.0
+ *
+ * FREE SOFTWARE LICENSE
+ *
+ * This software is provided free of charge for personal use.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Use at your own risk. The authors take no responsibility for
+ * any consequences resulting from the use of this software.
+ *
+ * Automated gameplay may violate the terms of service of gambling
+ * sites. Users are responsible for ensuring compliance with all
+ * applicable laws and terms of service.
+ */
 
 (function () {
   'use strict';
