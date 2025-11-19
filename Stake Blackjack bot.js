@@ -1666,35 +1666,32 @@
     btnLog.style.cssText = 'background:#6366f1;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnLog.onclick = () => toggleLogWindow();
 
-    // Continuation cycle container
-    const continuationContainer = document.createElement('div');
-    continuationContainer.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-
-    const continuationCheckbox = document.createElement('input');
-    continuationCheckbox.type = 'checkbox';
-    continuationCheckbox.id = 'sbj-continuation';
-    continuationCheckbox.checked = SBJ._continuationEnabled;
-    continuationCheckbox.style.cssText = 'width: 16px !important; height: 16px !important; cursor: pointer !important; accent-color: #16a34a !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: relative !important; margin: 0 !important;';
-    continuationCheckbox.onchange = (e) => {
-      SBJ._continuationEnabled = e.target.checked;
-      if (!e.target.checked) {
-        SBJ._clearState(); // Clear saved state when disabled
+    // Continuation cycle toggle button
+    const btnContinuation = document.createElement('button');
+    const updateContinuationButton = () => {
+      if (SBJ._continuationEnabled) {
+        btnContinuation.textContent = 'Continuation: ON';
+        btnContinuation.style.cssText = 'background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
+      } else {
+        btnContinuation.textContent = 'Continuation: OFF';
+        btnContinuation.style.cssText = 'background:#ef4444;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
       }
     };
-
-    const continuationLabel = document.createElement('label');
-    continuationLabel.htmlFor = 'sbj-continuation';
-    continuationLabel.textContent = 'Continuation Cycle';
-    continuationLabel.style.cssText = 'font-size: 11px; color: #94a3b8; cursor: pointer;';
+    updateContinuationButton();
+    btnContinuation.onclick = () => {
+      SBJ._continuationEnabled = !SBJ._continuationEnabled;
+      if (!SBJ._continuationEnabled) {
+        SBJ._clearState(); // Clear saved state when disabled
+      }
+      updateContinuationButton();
+    };
 
     const reloadCounter = document.createElement('span');
     reloadCounter.textContent = 'Reloads: 0';
     reloadCounter.style.cssText = 'font-size: 11px; color: #f97316; font-weight: 700; min-width: 75px; text-align: center;';
     SBJ._reloadCountEl = reloadCounter;
 
-    continuationContainer.append(continuationCheckbox, continuationLabel, reloadCounter);
-
-    controlsRow.append(handCountContainer, wagerCountContainer, continuationContainer, btnStart, btnStop, btnOnce, btnLog);
+    controlsRow.append(handCountContainer, wagerCountContainer, btnContinuation, reloadCounter, btnStart, btnStop, btnOnce, btnLog);
 
     box.append(statusRow, controlsRow);
     document.documentElement.appendChild(box);
@@ -1735,10 +1732,6 @@
     SBJ._updateWagerCounter();
     SBJ._updateTotalWin();
     SBJ._updateReloadCounter();
-
-    // Update checkbox to match restored state
-    const checkbox = document.getElementById('sbj-continuation');
-    if (checkbox) checkbox.checked = true;
 
     // Wait for page to be ready (play/deal button visible)
     let attempts = 0;
