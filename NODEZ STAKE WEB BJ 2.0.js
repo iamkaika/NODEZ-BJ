@@ -1607,12 +1607,13 @@
     totalWin.style.cssText = 'font-size: 11px; color: #4ade80; font-weight: 700; min-width: 85px; text-align: center;';
     SBJ._totalWinEl = totalWin;
 
-    const handsPerSec = document.createElement('span');
-    handsPerSec.textContent = '-- h/s';
-    handsPerSec.style.cssText = 'font-size: 11px; color: #a78bfa; font-weight: 700; min-width: 55px; text-align: right;';
-    SBJ._handsPerSecEl = handsPerSec;
+    // Hands per second tracking kept but display hidden (can be re-enabled later)
+    // const handsPerSec = document.createElement('span');
+    // handsPerSec.textContent = '-- h/s';
+    // handsPerSec.style.cssText = 'font-size: 11px; color: #a78bfa; font-weight: 700; min-width: 55px; text-align: right;';
+    // SBJ._handsPerSecEl = handsPerSec;
 
-    statusRow.append(status, currentBet, totalWin, handsPerSec);
+    statusRow.append(status, currentBet, totalWin);
 
     // Bottom row: Controls
     const controlsRow = document.createElement('div');
