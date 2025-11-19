@@ -1740,6 +1740,10 @@
 
     const style = document.createElement('style');
     style.id = 'sbj-no-animations';
+
+    // Custom card back SVG with NODEZ branding
+    const cardBackSVG = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 140'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23111827'/%3E%3Cstop offset='100%25' style='stop-color:%231f2937'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='140' fill='url(%23bg)'/%3E%3Cpath d='M20,0 L25,0 M40,0 L45,0 M60,0 L65,0 M80,0 L85,0 M20,140 L25,140 M40,140 L45,140 M60,140 L65,140 M80,140 L85,140' stroke='%2316a34a' stroke-width='0.5' opacity='0.3'/%3E%3Cpath d='M0,20 L0,25 M0,40 L0,45 M0,60 L0,65 M0,80 L0,85 M0,100 L0,105 M0,120 L0,125 M100,20 L100,25 M100,40 L100,45 M100,60 L100,65 M100,80 L100,85 M100,100 L100,105 M100,120 L100,125' stroke='%2316a34a' stroke-width='0.5' opacity='0.3'/%3E%3Ctext x='50' y='30' font-family='monospace' font-size='14' font-weight='bold' fill='%2316a34a' text-anchor='middle' transform='rotate(90 50 30)'%3ENODEZ%3C/text%3E%3Ccircle cx='50' cy='70' r='25' fill='none' stroke='%2316a34a' stroke-width='0.5' opacity='0.2'/%3E%3Ccircle cx='50' cy='70' r='20' fill='none' stroke='%2316a34a' stroke-width='0.5' opacity='0.2'/%3E%3C/svg%3E`;
+
     style.textContent = `
       * {
         animation: none !important;
@@ -1748,6 +1752,11 @@
         transition: none !important;
         transition-duration: 0s !important;
         transition-delay: 0s !important;
+      }
+      /* Custom NODEZ card back */
+      .back {
+        background-image: url('${cardBackSVG}') !important;
+        background-size: cover !important;
       }
     `;
     document.head.appendChild(style);
