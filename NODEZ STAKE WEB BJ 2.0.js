@@ -561,7 +561,14 @@
   function clickPlay() {
     const btn = q(SELECTORS.playBtn);
     if (!btn) return false;
-    return humanClick(btn);
+    const clicked = humanClick(btn);
+    if (clicked && SBJ._running) {
+      // Count hand when Play is actually clicked
+      SBJ._playedHands++;
+      console.log(`[SBJ DEBUG] Hand #${SBJ._playedHands} started (Play clicked)`);
+      SBJ._updateHandCounter();
+    }
+    return clicked;
   }
   function getAvailableActions() {
     return qa(SELECTORS.actBtns).map(b => b.getAttribute('data-test-action') || b.getAttribute('action') || '');
@@ -1552,9 +1559,7 @@
           break;
         }
 
-        this._playedHands++;
-        console.log(`[SBJ DEBUG] Starting hand #${this._playedHands}`);
-        this._updateHandCounter();
+        // Hand counting moved to clickPlay() for accuracy
         this._updateCurrentBet(); // Update bet display before each hand
 
         try {
