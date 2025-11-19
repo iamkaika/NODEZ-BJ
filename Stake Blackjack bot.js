@@ -1674,7 +1674,7 @@
     continuationCheckbox.type = 'checkbox';
     continuationCheckbox.id = 'sbj-continuation';
     continuationCheckbox.checked = SBJ._continuationEnabled;
-    continuationCheckbox.style.cssText = 'cursor: pointer;';
+    continuationCheckbox.style.cssText = 'width: 16px; height: 16px; cursor: pointer; accent-color: #16a34a; display: inline-block;';
     continuationCheckbox.onchange = (e) => {
       SBJ._continuationEnabled = e.target.checked;
       if (!e.target.checked) {
