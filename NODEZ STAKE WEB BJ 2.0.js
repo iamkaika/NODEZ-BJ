@@ -4,7 +4,7 @@
 // @version      2.0
 // @author       @kaika
 // @match        https://stake.us/casino/games/blackjack*
-// @run-at       document-start
+// @run-at       document-idle
 // @inject-into  page
 // @grant        none
 // ==/UserScript==
