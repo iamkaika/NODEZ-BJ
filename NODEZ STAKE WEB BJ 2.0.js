@@ -1781,7 +1781,7 @@
 
   const ro = new MutationObserver(() => {
     if (location.pathname.startsWith('/casino/games/blackjack')) {
-      // nukeAnimations(); // Temporarily disabled - may cause page load issues on Mac
+      nukeAnimations();
       mountPanel();
       // Delay autoResume to prevent blocking page load
       setTimeout(() => {
@@ -1792,7 +1792,7 @@
   ro.observe(document.documentElement, {childList:true, subtree:true});
   window.addEventListener('DOMContentLoaded', () => {
     if (location.pathname.startsWith('/casino/games/blackjack')) {
-      // nukeAnimations(); // Temporarily disabled - may cause page load issues on Mac
+      nukeAnimations();
       mountPanel();
       // Delay autoResume to prevent blocking page load
       setTimeout(() => {
