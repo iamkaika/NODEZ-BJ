@@ -912,6 +912,83 @@ TestSuite.test('RTP Calculation - Percentage Correct', () => {
   TestSuite.assertClose(rtp, 100.0, 0.1, 'RTP should be 100%');
 });
 
+// Test: Wager Tracking - Basic bet
+TestSuite.test('Wager Tracking - Basic bet tracked correctly', () => {
+  const betAmount = 0.50;
+  startNewHand(['J', '8'], 'K', betAmount);
+  logAction('stand', ['J', '8'], 18, false);
+
+  const mockState = TestSuite.mockGameState({
+    betAmount: betAmount,
+    playerHands: [{ value: 18, cards: [{rank:'J'},{rank:'8'}], actions: ['stand'] }],
+    dealer: { value: 17, cards: [{rank:'K'},{rank:'7'}] }
+  });
+  _lastBJRaw = mockState;
+
+  finishHand('win', 18, 17);
+
+  TestSuite.assertEqual(runningStats.totalBet, 0.50, 'Total wager should be 0.50');
+});
+
+// Test: Wager Tracking - Double down
+TestSuite.test('Wager Tracking - Double down wager tracked correctly', () => {
+  const betAmount = 0.50;
+  startNewHand(['5', '6'], '5', betAmount);
+  logAction('double', ['5', '6', 'K'], 21, false);
+
+  const mockState = TestSuite.mockGameState({
+    betAmount: betAmount * 2,
+    playerHands: [{ value: 21, cards: [{rank:'5'},{rank:'6'},{rank:'K'}], actions: ['double'] }],
+    dealer: { value: 20, cards: [{rank:'5'},{rank:'K'},{rank:'5'}] }
+  });
+  _lastBJRaw = mockState;
+
+  finishHand('win', 21, 20);
+
+  TestSuite.assertEqual(runningStats.totalBet, 1.00, 'Total wager should be 1.00 (doubled)');
+});
+
+// Test: Wager Tracking - Split
+TestSuite.test('Wager Tracking - Split wager tracked correctly', () => {
+  const betAmount = 0.50;
+  startNewHand(['8', '8'], '6', betAmount);
+  logAction('split', ['8', '8'], 16, false);
+
+  const mockState = TestSuite.mockGameState({
+    betAmount: betAmount * 2,
+    playerHands: [
+      { value: 18, cards: [{rank:'8'},{rank:'10'}], actions: ['split'] },
+      { value: 19, cards: [{rank:'8'},{rank:'A'}], actions: [] }
+    ],
+    dealer: { value: 20, cards: [{rank:'6'},{rank:'K'},{rank:'4'}] }
+  });
+  _lastBJRaw = mockState;
+
+  finishHand('loss', 18, 20);
+
+  TestSuite.assertEqual(runningStats.totalBet, 1.00, 'Total wager should be 1.00 (split = 2x bet)');
+});
+
+// Test: Wager Tracking - Multiple hands cumulative
+TestSuite.test('Wager Tracking - Multiple hands accumulate correctly', () => {
+  // Hand 1: $0.50 bet
+  startNewHand(['K', '9'], '7', 0.50);
+  logAction('stand', ['K', '9'], 19, false);
+  finishHand('win', 19, 18);
+
+  // Hand 2: $1.00 bet with double = $2.00 total
+  startNewHand(['5', '6'], '5', 1.00);
+  logAction('double', ['5', '6', 'K'], 21, false);
+  finishHand('win', 21, 20);
+
+  // Hand 3: $0.25 bet with split = $0.50 total
+  startNewHand(['8', '8'], '6', 0.25);
+  logAction('split', ['8', '8'], 16, false);
+  finishHand('loss', 18, 20);
+
+  TestSuite.assertClose(runningStats.totalBet, 3.00, 0.01, 'Total wager should be ~3.00 (0.50 + 2.00 + 0.50)');
+});
+
 // --------------------------- RUN TESTS ---------------------------
 (async () => {
   const results = await TestSuite.runAll();
