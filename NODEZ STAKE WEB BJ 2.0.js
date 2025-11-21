@@ -148,6 +148,25 @@
       console.log('[SBJ DEBUG] Payout detection - payout:', payout, 'profit:', profit, 'betAmount:', betAmount, 'result:', result);
       console.log('[SBJ DEBUG] Current hand details - isSplit:', currentHand.isSplit, 'splitBetAmount:', currentHand.splitBetAmount);
 
+      // SERVER COMPARISON: Log what server actually says
+      const serverBetAmount = bj?.bet?.amount || bj?.betAmount || 'unknown';
+      const serverPayout = bj?.payout || bj?.winAmount || bj?.totalWin || 'unknown';
+      const serverProfit = bj?.profit || bj?.netWin || 'unknown';
+      console.log('[SBJ SERVER] Server reports - bet:', serverBetAmount, 'payout:', serverPayout, 'profit:', serverProfit);
+
+      // Track discrepancy between our bet and server bet
+      if (serverBetAmount !== 'unknown' && Math.abs(serverBetAmount - betAmount) > 0.01) {
+        console.error('[SBJ DISCREPANCY] Bet mismatch! Our bet:', betAmount, 'Server bet:', serverBetAmount);
+        LiveValidator.logDiscrepancy({
+          type: 'BET_MISMATCH',
+          timestamp: new Date().toISOString(),
+          ourBet: betAmount,
+          serverBet: serverBetAmount,
+          difference: serverBetAmount - betAmount,
+          message: `Bet mismatch: we tracked $${betAmount.toFixed(2)} but server says $${serverBetAmount}`
+        });
+      }
+
       // Better split handling: for splits, check both player hands in the server state
       if (currentHand.isSplit && bj?.state?.player) {
         const playerHands = bj.state.player;
@@ -223,6 +242,34 @@
       }
 
       currentHand.winAmount = winAmount;
+
+      // SERVER PAYOUT COMPARISON
+      const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
+      if (!isNaN(serverPayoutNum) && serverPayoutNum > 0) {
+        const ourNet = winAmount - betAmount;
+        const serverNet = serverPayoutNum - (typeof serverBetAmount === 'number' ? serverBetAmount : betAmount);
+        if (Math.abs(winAmount - serverPayoutNum) > 0.01) {
+          console.error('[SBJ DISCREPANCY] Payout mismatch! Our calc:', winAmount, 'Server payout:', serverPayoutNum);
+          LiveValidator.logDiscrepancy({
+            type: 'PAYOUT_MISMATCH',
+            timestamp: new Date().toISOString(),
+            ourWin: winAmount,
+            serverPayout: serverPayoutNum,
+            ourNet: ourNet,
+            serverNet: serverNet,
+            difference: serverPayoutNum - winAmount,
+            hand: {
+              cards: currentHand.playerStart,
+              dealerUp: currentHand.dealerUp,
+              result: result,
+              bet: betAmount,
+              isSplit: currentHand.isSplit,
+              actions: currentHand.actions?.map(a => a.action).join(',')
+            },
+            message: `Payout mismatch: we calculated $${winAmount.toFixed(2)} but server paid $${serverPayoutNum.toFixed(2)} (diff: $${(serverPayoutNum - winAmount).toFixed(2)})`
+          });
+        }
+      }
 
       // LIVE VALIDATOR: Check payout calculation
       LiveValidator.validatePayout(currentHand, winAmount);
@@ -520,17 +567,22 @@
     let html = '';
 
     // Stats summary
+    const betMismatches = LiveValidator.discrepancies.filter(d => d.type === 'BET_MISMATCH').length;
+    const payoutMismatches = LiveValidator.discrepancies.filter(d => d.type === 'PAYOUT_MISMATCH').length;
     html += `<div style="background:rgba(239,68,68,0.1);padding:10px;border-radius:6px;margin-bottom:12px;">`;
     html += `<div style="color:#ef4444;font-weight:bold;margin-bottom:6px;">Summary</div>`;
     html += `<div>Decision Errors: ${summary.decisionDiscrepancies}</div>`;
     html += `<div>Payout Errors: ${summary.payoutDiscrepancies}</div>`;
+    html += `<div>Bet Mismatches: ${betMismatches}</div>`;
+    html += `<div>Server Payout Mismatches: ${payoutMismatches}</div>`;
     html += `<div>Unknown (null upRank): ${summary.unknownDecisions}</div>`;
     html += `</div>`;
 
     // Decision discrepancies
-    if (LiveValidator.discrepancies.length > 0) {
+    const decisionErrors = LiveValidator.discrepancies.filter(d => d.type === 'DECISION' || d.type === 'UNKNOWN');
+    if (decisionErrors.length > 0) {
       html += `<div style="color:#fbbf24;font-weight:bold;margin-bottom:8px;">Decision Discrepancies</div>`;
-      for (const d of LiveValidator.discrepancies.slice(-30).reverse()) {
+      for (const d of decisionErrors.slice(-20).reverse()) {
         html += `<div style="background:rgba(251,191,36,0.1);padding:8px;border-radius:4px;margin-bottom:6px;font-size:11px;">`;
         html += `<div style="color:#fbbf24;">${d.message}</div>`;
         if (d.view) {
@@ -539,6 +591,24 @@
           html += `</div>`;
         }
         html += `<div style="color:#6b7280;font-size:10px;">${d.timestamp}</div>`;
+        html += `</div>`;
+      }
+    }
+
+    // Bet/Payout mismatches (server comparison)
+    const serverMismatches = LiveValidator.discrepancies.filter(d => d.type === 'BET_MISMATCH' || d.type === 'PAYOUT_MISMATCH');
+    if (serverMismatches.length > 0) {
+      html += `<div style="color:#a78bfa;font-weight:bold;margin:12px 0 8px 0;">Server Mismatches (Net Gain Issues)</div>`;
+      for (const m of serverMismatches.slice(-20).reverse()) {
+        const color = m.type === 'BET_MISMATCH' ? '#c084fc' : '#a78bfa';
+        html += `<div style="background:rgba(167,139,250,0.1);padding:8px;border-radius:4px;margin-bottom:6px;font-size:11px;">`;
+        html += `<div style="color:${color};">[${m.type}] ${m.message}</div>`;
+        if (m.hand) {
+          html += `<div style="color:#9ca3af;margin-top:4px;">`;
+          html += `Cards: ${m.hand.cards} vs ${m.hand.dealerUp} | Result: ${m.hand.result} | Actions: ${m.hand.actions || 'none'}`;
+          html += `</div>`;
+        }
+        html += `<div style="color:#6b7280;font-size:10px;">${m.timestamp}</div>`;
         html += `</div>`;
       }
     }
