@@ -282,16 +282,24 @@
       }
 
       // Track discrepancy between our bet and server bet
-      if (serverBetAmount !== 'unknown' && Math.abs(serverBetAmount - betAmount) > 0.01) {
-        console.error('[SBJ DISCREPANCY] Bet mismatch! Our bet:', betAmount, 'Server bet:', serverBetAmount);
-        LiveValidator.logDiscrepancy({
-          type: 'BET_MISMATCH',
-          timestamp: new Date().toISOString(),
-          ourBet: betAmount,
-          serverBet: serverBetAmount,
-          difference: serverBetAmount - betAmount,
-          message: `Bet mismatch: we tracked $${betAmount.toFixed(2)} but server says $${serverBetAmount}`
-        });
+      // IMPORTANT: Use server bet if available - it's more accurate
+      let actualBet = betAmount;
+      if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
+        if (Math.abs(serverBetAmount - betAmount) > 0.01) {
+          console.error('[SBJ DISCREPANCY] Bet mismatch! Our bet:', betAmount, 'Server bet:', serverBetAmount);
+          LiveValidator.logDiscrepancy({
+            type: 'BET_MISMATCH',
+            timestamp: new Date().toISOString(),
+            ourBet: betAmount,
+            serverBet: serverBetAmount,
+            difference: serverBetAmount - betAmount,
+            message: `Bet mismatch: we tracked $${betAmount.toFixed(2)} but server says $${serverBetAmount}`
+          });
+        }
+        // Use server bet as the authoritative source
+        actualBet = serverBetAmount;
+        currentHand.betAmount = actualBet;
+        console.log('[SBJ DEBUG] Using server bet amount:', actualBet);
       }
 
       // Better split handling: for splits, check both player hands in the server state
