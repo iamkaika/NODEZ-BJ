@@ -219,47 +219,65 @@
       // Better split handling: for splits, check both player hands in the server state
       if (currentHand.isSplit && bj?.state?.player) {
         const playerHands = bj.state.player;
+        const dealerValue = bj.state?.dealer?.[0]?.value || 0;
         console.log('[SBJ DEBUG] Split detected with', playerHands.length, 'player hands');
 
-        // Calculate win amount based on each hand's outcome
+        // Track each split hand separately
+        currentHand.splitHands = [];
         let totalWinAmount = 0;
-        for (const hand of playerHands) {
+
+        for (let i = 0; i < playerHands.length; i++) {
+          const hand = playerHands[i];
           const handValue = hand.value || 0;
+          const handCards = hand.cards?.map(c => c.rank).join(',') || '?';
           const handActions = hand.actions || [];
-          const dealerValue = bj.state?.dealer?.[0]?.value || 0;
+          const doubled = handActions.includes('double');
 
           let handBet = currentHand.splitBetAmount || (betAmount / 2);
+          if (doubled) handBet *= 2;
 
-          // If this hand was doubled, account for that
-          if (handActions.includes('double')) {
-            handBet *= 2;
-          }
+          let handResult = 'unknown';
+          let handWin = 0;
 
           // Determine this hand's result
           if (handActions.includes('bust') || handValue > 21) {
-            // Lost this hand - win 0
-            console.log('[SBJ DEBUG] Split hand bust - bet:', handBet, 'win: 0');
+            handResult = 'loss';
+            handWin = 0;
           } else if (handValue === 21 && hand.cards?.length === 2) {
-            // Blackjack on split (usually pays 1:1, not 3:2)
-            totalWinAmount += handBet * 2;
-            console.log('[SBJ DEBUG] Split hand BJ - bet:', handBet, 'win:', handBet * 2);
+            handResult = 'win';
+            handWin = handBet * 2; // BJ on split pays 1:1
           } else if (dealerValue > 21) {
-            // Dealer busts, player wins
-            totalWinAmount += handBet * 2;
-            console.log('[SBJ DEBUG] Split hand win (dealer bust) - bet:', handBet, 'win:', handBet * 2);
+            handResult = 'win';
+            handWin = handBet * 2;
           } else if (handValue > dealerValue) {
-            // Won this hand
-            totalWinAmount += handBet * 2;
-            console.log('[SBJ DEBUG] Split hand win - bet:', handBet, 'win:', handBet * 2);
+            handResult = 'win';
+            handWin = handBet * 2;
           } else if (handValue === dealerValue) {
-            // Push this hand
-            totalWinAmount += handBet;
-            console.log('[SBJ DEBUG] Split hand push - bet:', handBet, 'win:', handBet);
+            handResult = 'push';
+            handWin = handBet;
           } else {
-            // Lost this hand (handValue < dealerValue)
-            console.log('[SBJ DEBUG] Split hand loss - bet:', handBet, 'win: 0');
+            handResult = 'loss';
+            handWin = 0;
           }
+
+          totalWinAmount += handWin;
+
+          // Store this split hand's details
+          currentHand.splitHands.push({
+            index: i + 1,
+            cards: handCards,
+            total: handValue,
+            bet: handBet,
+            doubled: doubled,
+            result: handResult,
+            won: handWin
+          });
+
+          console.log(`[SBJ DEBUG] Split hand ${i+1}: ${handCards}=${handValue} | bet:$${handBet} | ${handResult} | won:$${handWin}`);
         }
+
+        // Update playerStart to show all split hands
+        currentHand.playerStart = currentHand.splitHands.map(h => `[${h.cards}=${h.total}]`).join(' ');
 
         winAmount = totalWinAmount;
         console.log('[SBJ DEBUG] Split total winAmount:', winAmount, 'vs total bet:', betAmount);
@@ -424,6 +442,17 @@
         html += `<span style="color:${netGain >= 0 ? '#4ade80' : '#f87171'};">${netGain >= 0 ? '+' : ''}${netGain.toFixed(2)}</span>`;
         html += `<span>Won: ${hand.winAmount.toFixed(2)}</span>`;
         html += `</div>`;
+
+        // Show individual split hand details
+        if (hand.splitHands && hand.splitHands.length > 0) {
+          html += `<div style="color:#94a3b8;font-size:9px;margin-top:3px;padding-left:8px;border-left:2px solid #374151;">`;
+          for (const sh of hand.splitHands) {
+            const resultColor = sh.result === 'win' ? '#4ade80' : sh.result === 'push' ? '#fbbf24' : '#f87171';
+            const dbl = sh.doubled ? ' (2×)' : '';
+            html += `<div>Hand ${sh.index}: ${sh.cards}=${sh.total}${dbl} → <span style="color:${resultColor}">${sh.result.toUpperCase()}</span> $${sh.bet.toFixed(2)}→$${sh.won.toFixed(2)}</div>`;
+          }
+          html += `</div>`;
+        }
       }
 
       html += `</div>`;
