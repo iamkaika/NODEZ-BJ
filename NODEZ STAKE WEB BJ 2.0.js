@@ -129,9 +129,31 @@
 
   function finishHand(result, finalPlayerTotal, finalDealerTotal) {
     if (currentHand) {
+      // Get fresh server state for accurate data
+      const freshBj = deepFindBlackjack(_lastBJRaw);
+      const freshServerHand = freshBj?.state?.player?.[0];
+      const freshServerTotal = freshServerHand?.value;
+      const freshServerCards = freshServerHand?.cards?.map(c => c.rank).join(',');
+      const freshDealerHand = freshBj?.state?.dealer?.[0];
+      const freshDealerTotal = freshDealerHand?.value;
+
+      // Use server values if available, otherwise use passed values
+      const actualPlayerTotal = freshServerTotal || finalPlayerTotal;
+      const actualDealerTotal = freshDealerTotal || finalDealerTotal;
+
+      console.log('[SBJ DEBUG] finishHand - passed P:', finalPlayerTotal, 'D:', finalDealerTotal);
+      console.log('[SBJ DEBUG] finishHand - server P:', freshServerTotal, 'D:', freshDealerTotal);
+      console.log('[SBJ DEBUG] finishHand - using P:', actualPlayerTotal, 'D:', actualDealerTotal);
+
       currentHand.result = result;
-      currentHand.finalPlayer = finalPlayerTotal;
-      currentHand.finalDealer = finalDealerTotal;
+      currentHand.finalPlayer = actualPlayerTotal;
+      currentHand.finalDealer = actualDealerTotal;
+
+      // Update cards from server if available
+      if (freshServerCards && freshServerCards !== currentHand.playerStart) {
+        console.log('[SBJ DEBUG] Updating playerStart from server:', currentHand.playerStart, '->', freshServerCards);
+        currentHand.playerStart = freshServerCards;
+      }
 
       // Try to extract bet and win amounts from server state
       const bj = deepFindBlackjack(_lastBJRaw);
@@ -152,7 +174,34 @@
       const serverBetAmount = bj?.bet?.amount || bj?.betAmount || 'unknown';
       const serverPayout = bj?.payout || bj?.winAmount || bj?.totalWin || 'unknown';
       const serverProfit = bj?.profit || bj?.netWin || 'unknown';
+
+      // Get server's view of player cards
+      const serverPlayerHand = bj?.state?.player?.[0];
+      const serverCards = serverPlayerHand?.cards?.map(c => c.rank).join(',') || 'unknown';
+      const serverTotal = serverPlayerHand?.value || 'unknown';
+      const serverCardCount = serverPlayerHand?.cards?.length || 0;
+
       console.log('[SBJ SERVER] Server reports - bet:', serverBetAmount, 'payout:', serverPayout, 'profit:', serverProfit);
+      console.log('[SBJ SERVER] Server cards:', serverCards, 'total:', serverTotal, 'count:', serverCardCount);
+      console.log('[SBJ COMPARE] Our cards:', currentHand.playerStart, 'Server cards:', serverCards);
+
+      // Check if our tracked cards match server cards
+      if (serverCards !== 'unknown' && currentHand.playerStart !== serverCards) {
+        console.error('[SBJ DISCREPANCY] Card mismatch! Our cards:', currentHand.playerStart, 'Server cards:', serverCards);
+        LiveValidator.logDiscrepancy({
+          type: 'CARD_MISMATCH',
+          timestamp: new Date().toISOString(),
+          ourCards: currentHand.playerStart,
+          serverCards: serverCards,
+          ourTotal: finalPlayerTotal,
+          serverTotal: serverTotal,
+          message: `Card mismatch: we tracked "${currentHand.playerStart}" but server has "${serverCards}"`
+        });
+
+        // FIX: Use server cards instead of our stale tracked cards
+        console.log('[SBJ FIX] Updating hand cards from server:', serverCards);
+        currentHand.playerStart = serverCards;
+      }
 
       // Track discrepancy between our bet and server bet
       if (serverBetAmount !== 'unknown' && Math.abs(serverBetAmount - betAmount) > 0.01) {
@@ -215,20 +264,30 @@
         winAmount = totalWinAmount;
         console.log('[SBJ DEBUG] Split total winAmount:', winAmount, 'vs total bet:', betAmount);
       } else if (result === 'win') {
-        // Calculate payout ourselves (don't trust API payout field)
-        // Check for blackjack: 21 with exactly 2 cards and no actions (no hits/doubles)
+        // Check for blackjack using BOTH our tracking and server data
+        // Trust server data over our tracking when available
         const hasNoActions = !currentHand.actions || currentHand.actions.length === 0 ||
                               (currentHand.actions.length === 1 && currentHand.actions[0].action === 'stand');
-        const hasTwoCards = currentHand.playerStart && currentHand.playerStart.split(',').length === 2;
-        const isBlackjack = (finalPlayerTotal === 21) && hasTwoCards && hasNoActions;
+
+        // Use server card count if available, fall back to our tracking
+        const serverHasTwoCards = serverCardCount === 2;
+        const ourHasTwoCards = currentHand.playerStart && currentHand.playerStart.split(',').length === 2;
+        const hasTwoCards = serverCardCount > 0 ? serverHasTwoCards : ourHasTwoCards;
+
+        // Use server total if available
+        const checkTotal = serverTotal !== 'unknown' ? serverTotal : finalPlayerTotal;
+
+        const isBlackjack = (checkTotal === 21) && hasTwoCards && hasNoActions;
 
         // Detailed logging for blackjack detection
-        console.log('[SBJ DEBUG] BJ Check - total:', finalPlayerTotal, 'cards:', currentHand.playerStart, 'actions:', currentHand.actions?.map(a => a.action).join(',') || 'none');
-        console.log('[SBJ DEBUG] BJ Check - hasTwoCards:', hasTwoCards, 'hasNoActions:', hasNoActions, 'isBlackjack:', isBlackjack);
+        console.log('[SBJ DEBUG] BJ Check - ourTotal:', finalPlayerTotal, 'serverTotal:', serverTotal, 'using:', checkTotal);
+        console.log('[SBJ DEBUG] BJ Check - ourCards:', currentHand.playerStart, 'serverCards:', serverCards, 'serverCardCount:', serverCardCount);
+        console.log('[SBJ DEBUG] BJ Check - hasTwoCards:', hasTwoCards, '(server:', serverHasTwoCards, 'ours:', ourHasTwoCards, ')');
+        console.log('[SBJ DEBUG] BJ Check - hasNoActions:', hasNoActions, 'isBlackjack:', isBlackjack);
 
         if (isBlackjack) {
           winAmount = betAmount * 2.5; // 3:2 payout
-          console.log('[SBJ DEBUG] *** BLACKJACK WIN *** - bet:', betAmount, 'winAmount:', winAmount, 'cards:', currentHand.playerStart);
+          console.log('[SBJ DEBUG] *** BLACKJACK WIN *** - bet:', betAmount, 'winAmount:', winAmount);
         } else {
           winAmount = betAmount * 2; // 1:1 payout
           console.log('[SBJ DEBUG] Regular win - bet:', betAmount, 'winAmount:', winAmount);
