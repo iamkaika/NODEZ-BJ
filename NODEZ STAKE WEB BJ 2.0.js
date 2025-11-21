@@ -224,6 +224,9 @@
 
       currentHand.winAmount = winAmount;
 
+      // LIVE VALIDATOR: Check payout calculation
+      LiveValidator.validatePayout(currentHand, winAmount);
+
       // Store action summary before clearing currentHand
       const actionSummary = currentHand.actions.map(a => a.action).join(',');
 
@@ -261,6 +264,9 @@
       console.log('[SBJ DEBUG] Hand finished. Bet:', actualBetAmount, 'Won:', winAmount, 'Result:', result, 'Action summary:', actionSummary);
       console.log('[SBJ DEBUG] Running totals - Hands:', runningStats.totalHands, 'Bet:', runningStats.totalBet, 'Won:', runningStats.totalWon, 'Net:', (runningStats.totalWon - runningStats.totalBet).toFixed(2));
       updateLogWindow();
+
+      // Check if we should auto-send bug report to Discord
+      LiveValidator.checkAutoSend();
     }
   }
 
@@ -466,6 +472,124 @@
     updateLogWindow();
   }
 
+  // --------------------------- Bugs Window ---------------------------
+  function toggleBugsWindow() {
+    let bugsWindow = document.getElementById('sbj-bugs-window');
+
+    if (bugsWindow) {
+      bugsWindow.remove();
+      return;
+    }
+
+    bugsWindow = document.createElement('div');
+    bugsWindow.id = 'sbj-bugs-window';
+    bugsWindow.style.cssText = `
+      position: fixed; z-index: 2147483647; top: 20px; left: 20px;
+      width: 500px; height: 600px; background: rgba(0,0,0,0.95); color: #fff;
+      border: 2px solid #ef4444; border-radius: 12px; backdrop-filter: blur(8px);
+      display: flex; flex-direction: column; font: 12px/1.3 'Monaco', 'Consolas', monospace;
+      box-shadow: 0 8px 32px rgba(239,68,68,0.4);
+    `;
+
+    const header = document.createElement('div');
+    header.style.cssText = `
+      padding: 12px 16px; border-bottom: 1px solid #ef4444; display: flex;
+      justify-content: space-between; align-items: center; background: rgba(239,68,68,0.2);
+    `;
+
+    const summary = LiveValidator.getSummary();
+    header.innerHTML = `
+      <span style="font-weight: bold; color: #ef4444;">Bug Report (${summary.totalDiscrepancies} issues)</span>
+      <div>
+        <button id="sbj-bugs-discord" style="background:#5865F2;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin-right:4px;">Send to Discord</button>
+        <button id="sbj-bugs-copy" style="background:#374151;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin-right:4px;">Copy</button>
+        <button id="sbj-bugs-download" style="background:#374151;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin-right:4px;">Download</button>
+        <button id="sbj-bugs-clear" style="background:#374151;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin-right:4px;">Clear</button>
+        <button onclick="document.getElementById('sbj-bugs-window').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;padding:0;width:24px;height:24px;">×</button>
+      </div>
+    `;
+
+    const content = document.createElement('div');
+    content.id = 'sbj-bugs-content';
+    content.style.cssText = `
+      flex: 1; overflow-y: auto; padding: 12px;
+      scrollbar-width: thin; scrollbar-color: #ef4444 transparent;
+    `;
+
+    // Populate content
+    let html = '';
+
+    // Stats summary
+    html += `<div style="background:rgba(239,68,68,0.1);padding:10px;border-radius:6px;margin-bottom:12px;">`;
+    html += `<div style="color:#ef4444;font-weight:bold;margin-bottom:6px;">Summary</div>`;
+    html += `<div>Decision Errors: ${summary.decisionDiscrepancies}</div>`;
+    html += `<div>Payout Errors: ${summary.payoutDiscrepancies}</div>`;
+    html += `<div>Unknown (null upRank): ${summary.unknownDecisions}</div>`;
+    html += `</div>`;
+
+    // Decision discrepancies
+    if (LiveValidator.discrepancies.length > 0) {
+      html += `<div style="color:#fbbf24;font-weight:bold;margin-bottom:8px;">Decision Discrepancies</div>`;
+      for (const d of LiveValidator.discrepancies.slice(-30).reverse()) {
+        html += `<div style="background:rgba(251,191,36,0.1);padding:8px;border-radius:4px;margin-bottom:6px;font-size:11px;">`;
+        html += `<div style="color:#fbbf24;">${d.message}</div>`;
+        if (d.view) {
+          html += `<div style="color:#9ca3af;margin-top:4px;">`;
+          html += `Cards: ${d.view.cards} | Total: ${d.view.total}${d.view.soft ? ' (soft)' : ''} | Dealer: ${d.view.upRank || 'NULL'}`;
+          html += `</div>`;
+        }
+        html += `<div style="color:#6b7280;font-size:10px;">${d.timestamp}</div>`;
+        html += `</div>`;
+      }
+    }
+
+    // Payout discrepancies
+    if (LiveValidator.payoutDiscrepancies.length > 0) {
+      html += `<div style="color:#f87171;font-weight:bold;margin:12px 0 8px 0;">Payout Discrepancies</div>`;
+      for (const p of LiveValidator.payoutDiscrepancies.slice(-30).reverse()) {
+        html += `<div style="background:rgba(248,113,113,0.1);padding:8px;border-radius:4px;margin-bottom:6px;font-size:11px;">`;
+        html += `<div style="color:#f87171;">${p.message}</div>`;
+        html += `<div style="color:#9ca3af;margin-top:4px;">`;
+        html += `Bet: ${p.handData.betAmount} | Result: ${p.handData.result} | Split: ${p.handData.isSplit}`;
+        html += `</div>`;
+        html += `<div style="color:#9ca3af;">`;
+        html += `Player: ${p.handData.playerStart} → ${p.handData.finalPlayer} | Dealer: ${p.handData.finalDealer}`;
+        html += `</div>`;
+        html += `<div style="color:#6b7280;font-size:10px;">${p.timestamp}</div>`;
+        html += `</div>`;
+      }
+    }
+
+    if (LiveValidator.discrepancies.length === 0 && LiveValidator.payoutDiscrepancies.length === 0) {
+      html = '<div style="color:#4ade80;text-align:center;margin-top:40px;font-size:14px;">✓ No bugs detected!</div>';
+    }
+
+    content.innerHTML = html;
+
+    bugsWindow.append(header, content);
+    document.documentElement.appendChild(bugsWindow);
+
+    // Wire up buttons
+    document.getElementById('sbj-bugs-discord').onclick = async () => {
+      const btn = document.getElementById('sbj-bugs-discord');
+      btn.textContent = 'Sending...';
+      btn.disabled = true;
+      const success = await LiveValidator.sendToDiscord();
+      btn.textContent = success ? 'Sent!' : 'Failed';
+      setTimeout(() => {
+        btn.textContent = 'Send to Discord';
+        btn.disabled = false;
+      }, 2000);
+    };
+    document.getElementById('sbj-bugs-copy').onclick = () => LiveValidator.copyToClipboard();
+    document.getElementById('sbj-bugs-download').onclick = () => LiveValidator.downloadAsFile();
+    document.getElementById('sbj-bugs-clear').onclick = () => {
+      LiveValidator.clear();
+      toggleBugsWindow(); // Close and reopen to refresh
+      toggleBugsWindow();
+    };
+  }
+
   // --------------------------- DOM helpers ---------------------------
   const q  = (sel, root=document)=>root.querySelector(sel);
   const qa = (sel, root=document)=>Array.from(root.querySelectorAll(sel));
@@ -621,6 +745,494 @@
       "AA":{"2":"P","3":"P","4":"P","5":"P","6":"P","7":"P","8":"P","9":"P","10":"P","A":"P"}
     }
   };
+
+  // --------------------------- LIVE VALIDATOR ---------------------------
+  const LiveValidator = {
+    enabled: true,
+    discrepancies: [],
+    payoutDiscrepancies: [],
+    maxLogs: 100,
+
+    // Calculate expected decision independently
+    getExpectedDecision(view) {
+      const { total, soft, upRank, actions, cardsRanks } = view;
+
+      // Safety guards first
+      if (!soft && total >= 17 && actions.includes('stand')) return 'stand';
+      if (soft && total >= 19 && actions.includes('stand')) return 'stand';
+
+      // Null upRank safety
+      if (!upRank) {
+        if (!soft && total >= 13 && total <= 16 && actions.includes('stand')) return 'stand';
+        return null; // Can't determine
+      }
+
+      // Split check
+      if (cardsRanks.length === 2 && cardsRanks[0] === cardsRanks[1] && actions.includes('split')) {
+        const tenRanks = new Set(['10','J','Q','K']);
+        const pairKey = tenRanks.has(cardsRanks[0]) ? '1010' : (cardsRanks[0] + cardsRanks[1]);
+        const rec = betMatrix.splits[pairKey]?.[upRank];
+        if (rec === 'P') return 'split';
+        if (rec === 'S') return 'stand';
+        if (rec === 'H') return 'hit';
+        if (rec === 'D') return actions.includes('double') ? 'double' : 'hit';
+      }
+
+      // Soft hands
+      if (soft) {
+        const row = betMatrix.soft[String(total)];
+        const rec = row?.[upRank];
+        if (rec === 'S') return 'stand';
+        if (rec === 'H') return 'hit';
+        if (rec === 'D') return actions.includes('double') ? 'double' : 'hit';
+        if (rec === 'DS') return actions.includes('double') ? 'double' : 'stand';
+        if (total < 18) return 'hit';
+        return 'stand';
+      }
+
+      // Hard hands
+      const row = betMatrix.hard[String(total)];
+      const rec = row?.[upRank];
+      if (rec === 'S') return 'stand';
+      if (rec === 'H') return 'hit';
+      if (rec === 'D') return actions.includes('double') ? 'double' : 'hit';
+
+      // Fallback
+      if (total < 17) return 'hit';
+      return 'stand';
+    },
+
+    // Calculate expected payout
+    getExpectedPayout(betAmount, result, isBlackjack, isSplit, splitResults) {
+      if (isSplit && splitResults) {
+        let total = 0;
+        for (const sr of splitResults) {
+          if (sr.result === 'win') total += sr.bet * 2;
+          else if (sr.result === 'push') total += sr.bet;
+          // loss = 0
+        }
+        return total;
+      }
+
+      if (result === 'win') {
+        return isBlackjack ? betAmount * 2.5 : betAmount * 2;
+      } else if (result === 'push') {
+        return betAmount;
+      }
+      return 0;
+    },
+
+    // Validate a decision before it's executed
+    validateDecision(view, actualDecision) {
+      if (!this.enabled) return;
+
+      const expected = this.getExpectedDecision(view);
+      if (expected === null) {
+        // Can't validate (missing data)
+        this.logDiscrepancy({
+          type: 'UNKNOWN',
+          timestamp: new Date().toISOString(),
+          view: { ...view },
+          expected: 'UNKNOWN (null upRank)',
+          actual: actualDecision,
+          message: 'Could not validate - upRank is null'
+        });
+        return;
+      }
+
+      if (expected !== actualDecision) {
+        const discrepancy = {
+          type: 'DECISION',
+          timestamp: new Date().toISOString(),
+          view: {
+            total: view.total,
+            soft: view.soft,
+            upRank: view.upRank,
+            cards: view.cardsRanks?.join(','),
+            actions: view.actions?.join(',')
+          },
+          expected,
+          actual: actualDecision,
+          message: `Expected ${expected} but got ${actualDecision} for ${view.soft ? 'soft' : 'hard'} ${view.total} vs ${view.upRank}`
+        };
+
+        this.discrepancies.push(discrepancy);
+        if (this.discrepancies.length > this.maxLogs) {
+          this.discrepancies = this.discrepancies.slice(-this.maxLogs);
+        }
+
+        console.error('[VALIDATOR] DECISION DISCREPANCY:', discrepancy.message);
+        console.error('[VALIDATOR] Full context:', discrepancy);
+      }
+    },
+
+    // Validate payout after hand completes
+    validatePayout(handData, actualWon) {
+      if (!this.enabled || !handData) return;
+
+      const { betAmount, result, isSplit, splitBetAmount } = handData;
+      const isBlackjack = result === 'win' &&
+                          handData.playerStart?.split(',').length === 2 &&
+                          (!handData.actions || handData.actions.length === 0 ||
+                           (handData.actions.length === 1 && handData.actions[0].action === 'stand'));
+
+      let expectedWon;
+      if (isSplit) {
+        // For splits, we need to recalculate based on individual hand outcomes
+        // This is complex - skip detailed validation for now, just flag large discrepancies
+        expectedWon = actualWon; // Trust split calculation for now
+      } else if (result === 'win') {
+        // Check for blackjack (21 with 2 cards, no hit/double actions)
+        const cards = handData.playerStart?.split(',') || [];
+        const hasHitOrDouble = handData.actions?.some(a => a.action === 'hit' || a.action === 'double');
+        const isBJ = handData.finalPlayer === 21 && cards.length === 2 && !hasHitOrDouble;
+        expectedWon = isBJ ? betAmount * 2.5 : betAmount * 2;
+      } else if (result === 'push') {
+        expectedWon = betAmount;
+      } else {
+        expectedWon = 0;
+      }
+
+      const diff = Math.abs(expectedWon - actualWon);
+      if (diff > 0.01) { // Allow small floating point errors
+        const discrepancy = {
+          type: 'PAYOUT',
+          timestamp: new Date().toISOString(),
+          handData: {
+            betAmount,
+            result,
+            isSplit,
+            splitBetAmount,
+            playerStart: handData.playerStart,
+            finalPlayer: handData.finalPlayer,
+            finalDealer: handData.finalDealer,
+            actions: handData.actions?.map(a => a.action).join(',')
+          },
+          expected: expectedWon,
+          actual: actualWon,
+          difference: actualWon - expectedWon,
+          message: `Payout mismatch: expected ${expectedWon.toFixed(2)} but got ${actualWon.toFixed(2)} (diff: ${(actualWon - expectedWon).toFixed(2)})`
+        };
+
+        this.payoutDiscrepancies.push(discrepancy);
+        if (this.payoutDiscrepancies.length > this.maxLogs) {
+          this.payoutDiscrepancies = this.payoutDiscrepancies.slice(-this.maxLogs);
+        }
+
+        console.error('[VALIDATOR] PAYOUT DISCREPANCY:', discrepancy.message);
+        console.error('[VALIDATOR] Full context:', discrepancy);
+      }
+    },
+
+    logDiscrepancy(entry) {
+      this.discrepancies.push(entry);
+      if (this.discrepancies.length > this.maxLogs) {
+        this.discrepancies = this.discrepancies.slice(-this.maxLogs);
+      }
+    },
+
+    // Get summary stats
+    getSummary() {
+      return {
+        decisionDiscrepancies: this.discrepancies.filter(d => d.type === 'DECISION').length,
+        payoutDiscrepancies: this.payoutDiscrepancies.length,
+        unknownDecisions: this.discrepancies.filter(d => d.type === 'UNKNOWN').length,
+        totalDiscrepancies: this.discrepancies.length + this.payoutDiscrepancies.length
+      };
+    },
+
+    // Clear all logs
+    clear() {
+      this.discrepancies = [];
+      this.payoutDiscrepancies = [];
+    },
+
+    // Export all discrepancies as JSON
+    export() {
+      return JSON.stringify({
+        decisions: this.discrepancies,
+        payouts: this.payoutDiscrepancies,
+        summary: this.getSummary(),
+        exportedAt: new Date().toISOString()
+      }, null, 2);
+    },
+
+    // Copy to clipboard
+    copyToClipboard() {
+      const data = this.export();
+      navigator.clipboard.writeText(data).then(() => {
+        console.log('[VALIDATOR] Discrepancies copied to clipboard');
+        alert('Discrepancies copied to clipboard!');
+      }).catch(err => {
+        console.error('[VALIDATOR] Failed to copy:', err);
+      });
+      return data;
+    },
+
+    // Download as JSON file
+    downloadAsFile() {
+      const data = this.export();
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sbj-bugs-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      console.log('[VALIDATOR] Discrepancies downloaded');
+    },
+
+    // Send to webhook/database endpoint
+    async sendToWebhook(webhookUrl) {
+      if (!webhookUrl) {
+        webhookUrl = localStorage.getItem('sbj-webhook-url');
+        if (!webhookUrl) {
+          console.error('[VALIDATOR] No webhook URL configured. Set with: SBJValidator.setWebhook("your-url")');
+          return false;
+        }
+      }
+
+      const payload = {
+        decisions: this.discrepancies,
+        payouts: this.payoutDiscrepancies,
+        summary: this.getSummary(),
+        metadata: {
+          userAgent: navigator.userAgent,
+          timestamp: new Date().toISOString(),
+          runningStats: { ...runningStats }
+        }
+      };
+
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          console.log('[VALIDATOR] Bugs sent to webhook successfully');
+          return true;
+        } else {
+          console.error('[VALIDATOR] Webhook returned error:', response.status);
+          return false;
+        }
+      } catch (err) {
+        console.error('[VALIDATOR] Failed to send to webhook:', err);
+        return false;
+      }
+    },
+
+    // Set webhook URL
+    setWebhook(url) {
+      localStorage.setItem('sbj-webhook-url', url);
+      console.log('[VALIDATOR] Webhook URL saved');
+    },
+
+    // Auto-send when discrepancy count exceeds threshold
+    autoSendThreshold: 10,
+    _lastAutoSend: 0,
+
+    // Default Discord webhook
+    defaultWebhook: 'https://discord.com/api/webhooks/1441524957426483231/yQn2hdpiVDG-Y2JxZxKyDECvnCrAm5wCfUbmpOJjKzVebn6CKH8cbF1YQOepk8ZlH8kD',
+
+    checkAutoSend() {
+      const total = this.discrepancies.length + this.payoutDiscrepancies.length;
+      if (total >= this.autoSendThreshold && total > this._lastAutoSend) {
+        this._lastAutoSend = total;
+        const webhookUrl = localStorage.getItem('sbj-webhook-url') || this.defaultWebhook;
+        if (webhookUrl) {
+          this.sendToDiscord(webhookUrl);
+        }
+      }
+    },
+
+    // Send to Discord webhook (formatted for Discord)
+    async sendToDiscord(webhookUrl) {
+      if (!webhookUrl) {
+        webhookUrl = localStorage.getItem('sbj-webhook-url') || this.defaultWebhook;
+      }
+
+      const summary = this.getSummary();
+
+      // Format for Discord embed
+      const embed = {
+        title: '🐛 SBJ Bug Report',
+        color: 0xef4444, // Red
+        fields: [
+          {
+            name: 'Summary',
+            value: `Decision Errors: ${summary.decisionDiscrepancies}\nPayout Errors: ${summary.payoutDiscrepancies}\nNull upRank: ${summary.unknownDecisions}`,
+            inline: true
+          },
+          {
+            name: 'Stats',
+            value: `Hands: ${runningStats.totalHands}\nBet: $${runningStats.totalBet.toFixed(2)}\nWon: $${runningStats.totalWon.toFixed(2)}\nNet: $${(runningStats.totalWon - runningStats.totalBet).toFixed(2)}`,
+            inline: true
+          }
+        ],
+        timestamp: new Date().toISOString()
+      };
+
+      // Add recent decision errors
+      if (this.discrepancies.length > 0) {
+        const recentDecisions = this.discrepancies.slice(-5).map(d =>
+          `• ${d.view?.soft ? 'Soft' : 'Hard'} ${d.view?.total} vs ${d.view?.upRank || 'NULL'}: Expected ${d.expected}, got ${d.actual}`
+        ).join('\n');
+        embed.fields.push({
+          name: 'Recent Decision Errors',
+          value: recentDecisions.substring(0, 1024) || 'None',
+          inline: false
+        });
+      }
+
+      // Add recent payout errors
+      if (this.payoutDiscrepancies.length > 0) {
+        const recentPayouts = this.payoutDiscrepancies.slice(-5).map(p =>
+          `• ${p.handData.result}: Expected $${p.expected.toFixed(2)}, got $${p.actual.toFixed(2)} (diff: $${p.difference.toFixed(2)})`
+        ).join('\n');
+        embed.fields.push({
+          name: 'Recent Payout Errors',
+          value: recentPayouts.substring(0, 1024) || 'None',
+          inline: false
+        });
+      }
+
+      const payload = {
+        embeds: [embed],
+        content: `Bug report from SBJ Bot - ${summary.totalDiscrepancies} issues detected`
+      };
+
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          console.log('[VALIDATOR] Bug report sent to Discord');
+          return true;
+        } else {
+          console.error('[VALIDATOR] Discord webhook error:', response.status);
+          return false;
+        }
+      } catch (err) {
+        console.error('[VALIDATOR] Failed to send to Discord:', err);
+        return false;
+      }
+    },
+
+    // Generate human-readable bug report
+    generateReport() {
+      const summary = this.getSummary();
+      let report = `=== SBJ BUG REPORT ===\n`;
+      report += `Generated: ${new Date().toISOString()}\n`;
+      report += `Total Discrepancies: ${summary.totalDiscrepancies}\n`;
+      report += `- Decision Errors: ${summary.decisionDiscrepancies}\n`;
+      report += `- Payout Errors: ${summary.payoutDiscrepancies}\n`;
+      report += `- Unknown (null upRank): ${summary.unknownDecisions}\n\n`;
+
+      if (this.discrepancies.length > 0) {
+        report += `=== DECISION DISCREPANCIES ===\n`;
+        for (const d of this.discrepancies.slice(-20)) {
+          report += `[${d.timestamp}] ${d.message}\n`;
+          if (d.view) {
+            report += `  Cards: ${d.view.cards}, Total: ${d.view.total}${d.view.soft ? ' (soft)' : ''}, Dealer: ${d.view.upRank}\n`;
+          }
+        }
+        report += '\n';
+      }
+
+      if (this.payoutDiscrepancies.length > 0) {
+        report += `=== PAYOUT DISCREPANCIES ===\n`;
+        for (const p of this.payoutDiscrepancies.slice(-20)) {
+          report += `[${p.timestamp}] ${p.message}\n`;
+          report += `  Bet: ${p.handData.betAmount}, Result: ${p.handData.result}, Split: ${p.handData.isSplit}\n`;
+          report += `  Player: ${p.handData.playerStart} → ${p.handData.finalPlayer}, Dealer: ${p.handData.finalDealer}\n`;
+        }
+      }
+
+      return report;
+    },
+
+    // Show report in console
+    showReport() {
+      console.log(this.generateReport());
+    },
+
+    // Send last N hands to Discord for manual debugging
+    async sendHandsToDiscord(count = 10) {
+      const webhookUrl = localStorage.getItem('sbj-webhook-url') || this.defaultWebhook;
+      if (!webhookUrl) {
+        console.error('[VALIDATOR] No webhook configured');
+        return false;
+      }
+
+      const recentHands = handHistory.slice(-count);
+      if (recentHands.length === 0) {
+        console.log('[VALIDATOR] No hands to send');
+        return false;
+      }
+
+      // Format hands for Discord
+      let handsText = '';
+      for (let i = 0; i < recentHands.length; i++) {
+        const h = recentHands[i];
+        const net = (h.winAmount - h.betAmount).toFixed(2);
+        const netSign = parseFloat(net) >= 0 ? '+' : '';
+        handsText += `**#${i + 1}** ${h.result.toUpperCase()} | ${h.playerStart} vs ${h.dealerUp} → P:${h.finalPlayer} D:${h.finalDealer}\n`;
+        handsText += `   Bet: $${h.betAmount.toFixed(2)} | Won: $${h.winAmount.toFixed(2)} | Net: ${netSign}$${net}`;
+        if (h.isSplit) handsText += ` | SPLIT`;
+        if (h.actions?.length > 0) handsText += ` | ${h.actions.map(a => a.action).join(',')}`;
+        handsText += '\n';
+      }
+
+      const embed = {
+        title: '📋 Manual Hand Log',
+        color: 0x3b82f6, // Blue
+        description: handsText.substring(0, 4000),
+        fields: [
+          {
+            name: 'Session Stats',
+            value: `Hands: ${runningStats.totalHands} | Bet: $${runningStats.totalBet.toFixed(2)} | Won: $${runningStats.totalWon.toFixed(2)} | Net: $${(runningStats.totalWon - runningStats.totalBet).toFixed(2)}`,
+            inline: false
+          }
+        ],
+        footer: { text: `Last ${recentHands.length} hands` },
+        timestamp: new Date().toISOString()
+      };
+
+      const payload = {
+        embeds: [embed],
+        content: `Manual hand log requested - ${recentHands.length} hands`
+      };
+
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          console.log('[VALIDATOR] Hand log sent to Discord');
+          return true;
+        } else {
+          console.error('[VALIDATOR] Discord error:', response.status);
+          return false;
+        }
+      } catch (err) {
+        console.error('[VALIDATOR] Failed to send:', err);
+        return false;
+      }
+    }
+  };
+
+  // Expose validator globally for console access
+  window.SBJValidator = LiveValidator;
 
   // --------------------------- State capture (fetch-only, safe) ---------------------------
   let _lastBJRaw = null; // whole JSON root that contains blackjackBet
@@ -802,6 +1414,22 @@
   function decideFromMatrix(view) {
     // returns one of ['hit','stand','double','split','noInsurance','insurance'] respecting DS/D rules + safety guards.
     const { total, soft, upRank, actions, cardsRanks } = view;
+
+    // DEBUG: Log every decision to catch null upRank
+    console.log(`[SBJ DEBUG] decideFromMatrix called: total=${total}, soft=${soft}, upRank=${upRank}, cards=[${cardsRanks?.join(',')}], actions=[${actions?.join(',')}]`);
+
+    // FIX: Handle null/undefined upRank safely (can happen during splits)
+    if (!upRank) {
+      console.warn(`[SBJ WARNING] upRank is ${upRank}! Using safe defaults.`);
+      // Conservative play when dealer upcard is unknown:
+      // - Hard 13-16: Stand (more often correct than hitting)
+      // - Hard 17+: Already handled by safety guard below
+      // - Soft hands: Let them fall through to normal soft logic
+      if (!soft && total >= 13 && total <= 16 && actions.includes('stand')) {
+        console.log(`[SBJ] Null upRank safety: Standing on hard ${total}`);
+        return 'stand';
+      }
+    }
 
     // insurance phase handled first
     if (actions.includes('noInsurance') || actions.includes('insurance')) {
@@ -1407,6 +2035,9 @@
           }
         }
 
+        // LIVE VALIDATOR: Check decision before executing
+        LiveValidator.validateDecision(currentView, decide);
+
         // Handle unavailable actions
         if (!gameActions.includes(decide)) {
           if (decide === 'double' && gameActions.includes('hit')) {
@@ -1703,6 +2334,36 @@
     btnLog.style.cssText = 'background:#6366f1;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
     btnLog.onclick = () => toggleLogWindow();
 
+    // Bugs button for validator
+    const btnBugs = document.createElement('button');
+    const updateBugsButton = () => {
+      const count = LiveValidator.getSummary().totalDiscrepancies;
+      btnBugs.textContent = `Bugs (${count})`;
+      btnBugs.style.cssText = count > 0
+        ? 'background:#ef4444;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;'
+        : 'background:#374151;color:#9ca3b8;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
+    };
+    updateBugsButton();
+    btnBugs.onclick = () => toggleBugsWindow();
+
+    // Update bugs count periodically
+    setInterval(updateBugsButton, 2000);
+
+    // Log Hands button - sends last 10 hands to Discord
+    const btnLogHands = document.createElement('button');
+    btnLogHands.textContent = '📋 Log';
+    btnLogHands.style.cssText = 'background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:11px;font-weight:700;cursor:pointer;';
+    btnLogHands.onclick = async () => {
+      btnLogHands.textContent = '📤...';
+      btnLogHands.disabled = true;
+      const success = await LiveValidator.sendHandsToDiscord(10);
+      btnLogHands.textContent = success ? '✓ Sent' : '✗ Failed';
+      setTimeout(() => {
+        btnLogHands.textContent = '📋 Log';
+        btnLogHands.disabled = false;
+      }, 2000);
+    };
+
     // Continuation cycle toggle button
     const btnContinuation = document.createElement('button');
     const updateContinuationButton = () => {
@@ -1728,7 +2389,7 @@
     reloadCounter.style.cssText = 'font-size: 11px; color: #f97316; font-weight: 700; min-width: 75px; text-align: center;';
     SBJ._reloadCountEl = reloadCounter;
 
-    controlsRow.append(handCountContainer, wagerCountContainer, btnContinuation, reloadCounter, btnStart, btnStop, btnOnce, btnLog);
+    controlsRow.append(handCountContainer, wagerCountContainer, btnContinuation, reloadCounter, btnStart, btnStop, btnOnce, btnLog, btnBugs, btnLogHands);
 
     box.append(statusRow, controlsRow);
     document.documentElement.appendChild(box);

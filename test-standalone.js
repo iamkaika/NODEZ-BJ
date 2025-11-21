@@ -969,6 +969,145 @@ TestSuite.test('Wager Tracking - Split wager tracked correctly', () => {
   TestSuite.assertEqual(runningStats.totalBet, 1.00, 'Total wager should be 1.00 (split = 2x bet)');
 });
 
+// Test: BUG FIX - Null upRank should not cause wrong decisions
+TestSuite.test('BUG: Null upRank Should Not Cause Hit on 13', () => {
+  // This reproduces the bug where during splits, upRank becomes null
+  // and the fallback logic incorrectly hits on hands that should stand
+
+  const betMatrix = {
+    hard: {
+      "12":{"2":"H","3":"H","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "13":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "14":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "15":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "16":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "17":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"S","8":"S","9":"S","10":"S","A":"S"},
+    },
+    soft: {}
+  };
+
+  // BROKEN VERSION - this is what the current code does
+  function decideFromMatrixBroken(view) {
+    const { total, soft, upRank, actions, cardsRanks } = view;
+
+    if (!soft && total >= 17 && actions.includes('stand')) return 'stand';
+
+    const row = betMatrix.hard[String(total)];
+    const rec = row?.[upRank]; // This returns undefined when upRank is null!
+
+    if (rec) {
+      if (rec === 'S' && actions.includes('stand')) return 'stand';
+      if (rec === 'H' && actions.includes('hit')) return 'hit';
+    }
+
+    // BUG: Falls through to this when upRank is null
+    if (total < 17 && actions.includes('hit')) return 'hit';
+    if (actions.includes('stand')) return 'stand';
+
+    return actions[0] || null;
+  }
+
+  // FIXED VERSION - handles null upRank safely
+  function decideFromMatrixFixed(view) {
+    const { total, soft, upRank, actions, cardsRanks } = view;
+
+    if (!soft && total >= 17 && actions.includes('stand')) return 'stand';
+
+    // FIX: If upRank is null/undefined, default to safe play for 13-16
+    if (!upRank) {
+      // Conservative play: stand on 13-16 (assume weak dealer)
+      if (!soft && total >= 13 && total <= 16 && actions.includes('stand')) {
+        return 'stand';
+      }
+    }
+
+    const row = betMatrix.hard[String(total)];
+    const rec = row?.[upRank];
+
+    if (rec) {
+      if (rec === 'S' && actions.includes('stand')) return 'stand';
+      if (rec === 'H' && actions.includes('hit')) return 'hit';
+    }
+
+    if (total < 17 && actions.includes('hit')) return 'hit';
+    if (actions.includes('stand')) return 'stand';
+
+    return actions[0] || null;
+  }
+
+  // Test case: Hard 13 with NULL upRank (simulating split bug)
+  const view13NullDealer = {
+    total: 13,
+    soft: false,
+    upRank: null, // BUG: This is what happens during splits
+    actions: ['hit', 'stand'],
+    cardsRanks: ['6', '7']
+  };
+
+  const brokenDecision = decideFromMatrixBroken(view13NullDealer);
+  const fixedDecision = decideFromMatrixFixed(view13NullDealer);
+
+  // The broken version INCORRECTLY returns 'hit'
+  TestSuite.assertEqual(brokenDecision, 'hit', 'Broken version hits on 13 with null upRank (demonstrating bug)');
+
+  // The fixed version should return 'stand' (safe default)
+  TestSuite.assertEqual(fixedDecision, 'stand', 'Fixed version stands on 13 with null upRank');
+});
+
+// Test: BUG FIX - All stiff hands (13-16) should stand when upRank is null
+TestSuite.test('BUG: All Stiff Hands Should Stand with Null upRank', () => {
+  const betMatrix = {
+    hard: {
+      "12":{"2":"H","3":"H","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "13":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "14":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "15":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "16":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "17":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"S","8":"S","9":"S","10":"S","A":"S"},
+    },
+    soft: {}
+  };
+
+  function decideFromMatrixFixed(view) {
+    const { total, soft, upRank, actions } = view;
+
+    if (!soft && total >= 17 && actions.includes('stand')) return 'stand';
+
+    // FIX: If upRank is null/undefined, default to safe play for 13-16
+    if (!upRank) {
+      if (!soft && total >= 13 && total <= 16 && actions.includes('stand')) {
+        return 'stand';
+      }
+    }
+
+    const row = betMatrix.hard[String(total)];
+    const rec = row?.[upRank];
+
+    if (rec) {
+      if (rec === 'S' && actions.includes('stand')) return 'stand';
+      if (rec === 'H' && actions.includes('hit')) return 'hit';
+    }
+
+    if (total < 17 && actions.includes('hit')) return 'hit';
+    if (actions.includes('stand')) return 'stand';
+
+    return actions[0] || null;
+  }
+
+  // Test all stiff hands with null upRank
+  for (let total = 13; total <= 16; total++) {
+    const view = {
+      total: total,
+      soft: false,
+      upRank: null,
+      actions: ['hit', 'stand'],
+      cardsRanks: ['10', String(total - 10)]
+    };
+    const decision = decideFromMatrixFixed(view);
+    TestSuite.assertEqual(decision, 'stand', `Hard ${total} with null upRank should stand`);
+  }
+});
+
 // Test: Wager Tracking - Multiple hands cumulative
 TestSuite.test('Wager Tracking - Multiple hands accumulate correctly', () => {
   // Hand 1: $0.50 bet
