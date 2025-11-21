@@ -181,6 +181,7 @@
       const freshServerHand = freshBj?.state?.player?.[0];
       const freshServerTotal = freshServerHand?.value;
       const freshServerCards = freshServerHand?.cards?.map(c => c.rank).join(',');
+      const freshServerCardCount = freshServerHand?.cards?.length || 0;
       const freshDealerHand = freshBj?.state?.dealer?.[0];
       const freshDealerTotal = freshDealerHand?.value;
       const freshDealerCards = freshDealerHand?.cards?.map(c => c.rank).join(',');
@@ -192,7 +193,7 @@
       // Check if dealer actually needed to play
       // Dealer only skips their turn if: player busts OR player has natural blackjack
       const playerBusted = actualPlayerTotal > 21;
-      const playerHasNaturalBJ = actualPlayerTotal === 21 && serverCardCount === 2 &&
+      const playerHasNaturalBJ = actualPlayerTotal === 21 && freshServerCardCount === 2 &&
                                   (!currentHand.actions || currentHand.actions.length === 0);
 
       // If dealer total < 17 but dealer should have played, we have stale data
