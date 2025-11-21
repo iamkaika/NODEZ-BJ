@@ -127,6 +127,53 @@
     }
   }
 
+  // Wait for valid dealer data before finishing hand
+  async function waitForDealerData(playerTotal, maxAttempts = 10) {
+    const playerBusted = playerTotal > 21;
+    const playerHasBJ = playerTotal === 21; // Might be natural BJ
+
+    // If player busted, dealer doesn't play - no need to wait
+    if (playerBusted) {
+      console.log('[SBJ DEBUG] Player busted, no need to wait for dealer');
+      return null;
+    }
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const bj = deepFindBlackjack(_lastBJRaw);
+      const dealerHand = bj?.state?.dealer?.[0];
+      const dealerTotal = dealerHand?.value || 0;
+      const dealerCards = dealerHand?.cards?.length || 0;
+
+      console.log(`[SBJ DEBUG] waitForDealerData attempt ${i+1}: dealerTotal=${dealerTotal}, cards=${dealerCards}`);
+
+      // Valid dealer total: >= 17 (stood) or > 21 (bust)
+      if (dealerTotal >= 17 || dealerTotal > 21) {
+        console.log('[SBJ DEBUG] Got valid dealer total:', dealerTotal);
+        return dealerTotal;
+      }
+
+      // If player has blackjack and dealer has 2 cards with total < 21, dealer loses
+      if (playerHasBJ && dealerCards === 2 && dealerTotal < 21) {
+        // Check if dealer also has BJ
+        if (dealerTotal === 21) {
+          return dealerTotal; // Push
+        }
+        // Player BJ wins, dealer doesn't play out
+        console.log('[SBJ DEBUG] Player BJ, dealer doesnt have BJ, returning dealer total:', dealerTotal);
+        return dealerTotal;
+      }
+
+      // Wait and retry
+      await new Promise(r => setTimeout(r, 150));
+
+      // Force re-read by triggering a small delay for network
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    console.log('[SBJ DEBUG] Timed out waiting for dealer data');
+    return null;
+  }
+
   function finishHand(result, finalPlayerTotal, finalDealerTotal) {
     if (currentHand) {
       // Get fresh server state for accurate data
@@ -2283,17 +2330,30 @@
           this._emit('[SBJ] Hand finished during action');
 
           // Try to determine result from dealer data
-          const finalState = readServer();
+          let finalState = readServer();
           if (finalState && currentHand) {
-            const dealerData = finalState.rawBj?.state?.dealer?.[0];
-            const dealerTotal = dealerData?.value || 0;
+            let dealerTotal = finalState.rawBj?.state?.dealer?.[0]?.value || 0;
 
-            // Simple result detection (could be enhanced)
+            // Wait for valid dealer data if player didn't bust
+            if (finalState.total <= 21 && dealerTotal < 17) {
+              console.log('[SBJ DEBUG] Waiting for dealer data after action...');
+              const freshDealerTotal = await waitForDealerData(finalState.total);
+              if (freshDealerTotal !== null) {
+                dealerTotal = freshDealerTotal;
+              }
+              finalState = readServer() || finalState;
+            }
+
+            // Result detection
             let result = 'unknown';
             if (finalState.total > 21) {
               result = 'loss'; // Player bust
             } else if (dealerTotal > 21) {
               result = 'win'; // Dealer bust
+            } else if (dealerTotal < 17) {
+              // Still no valid data, assume win for non-bust player
+              result = 'win';
+              console.log('[SBJ DEBUG] Dealer data incomplete after wait, assuming win');
             } else if (finalState.total > dealerTotal) {
               result = 'win';
             } else if (finalState.total < dealerTotal) {
@@ -2319,18 +2379,30 @@
         console.log('[SBJ DEBUG] Hand sequence complete, detecting final result...');
 
         // Try to get final game state and determine result
-        const finalState = readServer();
+        let finalState = readServer();
         if (finalState) {
-          const dealerData = finalState.rawBj?.state?.dealer?.[0];
-          const dealerTotal = dealerData?.value || 0;
+          let dealerTotal = finalState.rawBj?.state?.dealer?.[0]?.value || 0;
+
+          // Wait for valid dealer data if needed
+          if (finalState.total <= 21 && dealerTotal < 17) {
+            console.log('[SBJ DEBUG] Waiting for dealer to complete turn...');
+            const freshDealerTotal = await waitForDealerData(finalState.total);
+            if (freshDealerTotal !== null) {
+              dealerTotal = freshDealerTotal;
+            }
+            // Re-read server state after waiting
+            finalState = readServer() || finalState;
+          }
 
           let result = 'unknown';
           if (finalState.total > 21) {
             result = 'loss'; // Player bust
           } else if (dealerTotal > 21) {
             result = 'win'; // Dealer bust
-          } else if (dealerTotal === 0) {
-            result = 'unknown'; // Dealer hand not complete yet
+          } else if (dealerTotal === 0 || dealerTotal < 17) {
+            // Still no valid dealer data - likely player BJ or timing issue
+            result = 'win'; // Assume win if dealer data unavailable and player didn't bust
+            console.log('[SBJ DEBUG] Dealer data incomplete, assuming win for non-bust player');
           } else if (finalState.total > dealerTotal) {
             result = 'win';
           } else if (finalState.total < dealerTotal) {
