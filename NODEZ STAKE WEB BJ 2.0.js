@@ -142,13 +142,33 @@
       const actualPlayerTotal = freshServerTotal || finalPlayerTotal;
       let actualDealerTotal = freshDealerTotal || finalDealerTotal;
 
-      // If dealer total is less than 17, dealer hasn't completed their turn
-      // This happens when player busts or gets blackjack - dealer doesn't need to play
-      const dealerIncomplete = typeof actualDealerTotal === 'number' && actualDealerTotal < 17;
-      if (dealerIncomplete) {
-        console.log('[SBJ DEBUG] Dealer total < 17, hand incomplete (player bust/BJ)');
-        // Mark dealer total as incomplete
-        actualDealerTotal = '—'; // Dealer didn't need to play
+      // Check if dealer actually needed to play
+      // Dealer only skips their turn if: player busts OR player has natural blackjack
+      const playerBusted = actualPlayerTotal > 21;
+      const playerHasNaturalBJ = actualPlayerTotal === 21 && serverCardCount === 2 &&
+                                  (!currentHand.actions || currentHand.actions.length === 0);
+
+      // If dealer total < 17 but dealer should have played, we have stale data
+      const dealerShouldHavePlayed = !playerBusted && !playerHasNaturalBJ;
+      const dealerTotalSeemsIncomplete = typeof actualDealerTotal === 'number' && actualDealerTotal < 17;
+
+      if (dealerTotalSeemsIncomplete) {
+        if (dealerShouldHavePlayed) {
+          // Bug: We have stale dealer data. Log it but keep the value for debugging.
+          console.error('[SBJ BUG] Dealer total < 17 but dealer should have played!',
+            'playerTotal:', actualPlayerTotal, 'dealerTotal:', actualDealerTotal);
+          LiveValidator.logDiscrepancy({
+            type: 'DEALER_DATA_STALE',
+            timestamp: new Date().toISOString(),
+            playerTotal: actualPlayerTotal,
+            dealerTotal: actualDealerTotal,
+            message: `Dealer total ${actualDealerTotal} < 17 but player didn't bust (${actualPlayerTotal}). Stale data.`
+          });
+        } else {
+          // Dealer legitimately didn't play (player bust or natural BJ)
+          console.log('[SBJ DEBUG] Dealer didnt play - player:', playerBusted ? 'bust' : 'natural BJ');
+          actualDealerTotal = '—';
+        }
       }
 
       console.log('[SBJ DEBUG] finishHand - passed P:', finalPlayerTotal, 'D:', finalDealerTotal);
