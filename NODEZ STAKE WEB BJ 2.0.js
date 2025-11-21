@@ -136,13 +136,23 @@
       const freshServerCards = freshServerHand?.cards?.map(c => c.rank).join(',');
       const freshDealerHand = freshBj?.state?.dealer?.[0];
       const freshDealerTotal = freshDealerHand?.value;
+      const freshDealerCards = freshDealerHand?.cards?.map(c => c.rank).join(',');
 
       // Use server values if available, otherwise use passed values
       const actualPlayerTotal = freshServerTotal || finalPlayerTotal;
-      const actualDealerTotal = freshDealerTotal || finalDealerTotal;
+      let actualDealerTotal = freshDealerTotal || finalDealerTotal;
+
+      // If dealer total is less than 17, dealer hasn't completed their turn
+      // This happens when player busts or gets blackjack - dealer doesn't need to play
+      const dealerIncomplete = typeof actualDealerTotal === 'number' && actualDealerTotal < 17;
+      if (dealerIncomplete) {
+        console.log('[SBJ DEBUG] Dealer total < 17, hand incomplete (player bust/BJ)');
+        // Mark dealer total as incomplete
+        actualDealerTotal = '—'; // Dealer didn't need to play
+      }
 
       console.log('[SBJ DEBUG] finishHand - passed P:', finalPlayerTotal, 'D:', finalDealerTotal);
-      console.log('[SBJ DEBUG] finishHand - server P:', freshServerTotal, 'D:', freshDealerTotal);
+      console.log('[SBJ DEBUG] finishHand - server P:', freshServerTotal, 'D:', freshDealerTotal, 'cards:', freshDealerCards);
       console.log('[SBJ DEBUG] finishHand - using P:', actualPlayerTotal, 'D:', actualDealerTotal);
 
       currentHand.result = result;
