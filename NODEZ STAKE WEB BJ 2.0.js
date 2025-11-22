@@ -263,6 +263,35 @@
       console.log('[SBJ SERVER] Server cards:', serverCards, 'total:', serverTotal, 'count:', serverCardCount);
       console.log('[SBJ COMPARE] Our cards:', currentHand.playerStart, 'Server cards:', serverCards);
 
+      // CRITICAL: Determine result from server payout, not our calculation
+      // Server payout is the authoritative source
+      const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
+      if (!isNaN(serverPayoutNum) && serverPayoutNum > 0) {
+        const serverResult = serverPayoutNum > actualBet ? 'win' :
+                            serverPayoutNum === actualBet ? 'push' : 'loss';
+        if (serverResult !== result) {
+          console.error('[SBJ DISCREPANCY] Result mismatch! We calculated:', result, 'but server payout suggests:', serverResult);
+          console.error('[SBJ DISCREPANCY] Server payout:', serverPayoutNum, 'vs bet:', actualBet);
+          // Use server result as authoritative
+          result = serverResult;
+          currentHand.result = result;
+          LiveValidator.logDiscrepancy({
+            type: 'RESULT_MISMATCH',
+            timestamp: new Date().toISOString(),
+            ourResult: currentHand.result,
+            serverResult: serverResult,
+            serverPayout: serverPayoutNum,
+            bet: actualBet,
+            message: `Result mismatch: we said ${currentHand.result} but server payout $${serverPayoutNum} suggests ${serverResult}`
+          });
+        }
+      } else if (serverPayoutNum === 0 && result !== 'loss') {
+        // Server paid 0, should be a loss
+        console.error('[SBJ DISCREPANCY] Server paid $0 but we calculated:', result);
+        result = 'loss';
+        currentHand.result = result;
+      }
+
       // Check if our tracked cards match server cards
       if (serverCards !== 'unknown' && currentHand.playerStart !== serverCards) {
         console.error('[SBJ DISCREPANCY] Card mismatch! Our cards:', currentHand.playerStart, 'Server cards:', serverCards);
@@ -404,15 +433,25 @@
         console.log('[SBJ DEBUG] Loss - bet:', betAmount, 'winAmount:', winAmount);
       }
 
-      currentHand.winAmount = winAmount;
-
-      // SERVER PAYOUT COMPARISON
-      const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
-      if (!isNaN(serverPayoutNum) && serverPayoutNum > 0) {
-        const ourNet = winAmount - betAmount;
-        const serverNet = serverPayoutNum - (typeof serverBetAmount === 'number' ? serverBetAmount : betAmount);
+      // SERVER PAYOUT: Use server payout as authoritative if available
+      if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
         if (Math.abs(winAmount - serverPayoutNum) > 0.01) {
           console.error('[SBJ DISCREPANCY] Payout mismatch! Our calc:', winAmount, 'Server payout:', serverPayoutNum);
+          console.log('[SBJ FIX] Using server payout instead of our calculation');
+          // Use server payout as authoritative
+          winAmount = serverPayoutNum;
+        }
+      }
+
+      currentHand.winAmount = winAmount;
+
+      // SERVER PAYOUT COMPARISON (for logging only now, since we already corrected)
+      if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
+        const ourNet = winAmount - actualBet;
+        const serverNet = serverPayoutNum - actualBet;
+        if (Math.abs(winAmount - serverPayoutNum) > 0.01) {
+          // This shouldn't happen anymore since we use server payout
+          console.error('[SBJ BUG] Payout still mismatched after correction!');
           LiveValidator.logDiscrepancy({
             type: 'PAYOUT_MISMATCH',
             timestamp: new Date().toISOString(),
