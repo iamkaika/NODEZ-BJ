@@ -272,10 +272,18 @@
         if (bj.win) console.log('[SBJ DEBUG] bj.win:', bj.win);
       }
 
+      // IMPORTANT: Get actual bet amount first (needed for server payout comparison)
+      let actualBet = betAmount;
+      if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
+        actualBet = serverBetAmount;
+        currentHand.betAmount = actualBet;
+        console.log('[SBJ DEBUG] Using server bet amount:', actualBet);
+      }
+
       // CRITICAL: Determine result from server payout, not our calculation
       // Server payout is the authoritative source
       const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
-      if (!isNaN(serverPayoutNum) && serverPayoutNum > 0) {
+      if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
         const serverResult = serverPayoutNum > actualBet ? 'win' :
                             serverPayoutNum === actualBet ? 'push' : 'loss';
         if (serverResult !== result) {
@@ -319,9 +327,7 @@
         currentHand.playerStart = serverCards;
       }
 
-      // Track discrepancy between our bet and server bet
-      // IMPORTANT: Use server bet if available - it's more accurate
-      let actualBet = betAmount;
+      // Log bet mismatch if our tracked bet differs from server
       if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
         if (Math.abs(serverBetAmount - betAmount) > 0.01) {
           console.error('[SBJ DISCREPANCY] Bet mismatch! Our bet:', betAmount, 'Server bet:', serverBetAmount);
@@ -334,10 +340,6 @@
             message: `Bet mismatch: we tracked $${betAmount.toFixed(2)} but server says $${serverBetAmount}`
           });
         }
-        // Use server bet as the authoritative source
-        actualBet = serverBetAmount;
-        currentHand.betAmount = actualBet;
-        console.log('[SBJ DEBUG] Using server bet amount:', actualBet);
       }
 
       // Better split handling: for splits, check both player hands in the server state
