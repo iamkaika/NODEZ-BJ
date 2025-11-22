@@ -7,7 +7,10 @@ const fs = require('fs');
 const http = require('http');
 
 const LOG_FILE = '/tmp/bj-hands.log';
+const DRIFT_LOG = '/tmp/bj-drift.log';
 let currentHand = null;
+let lastWagerDiff = 0;
+let lastNetDiff = 0;
 
 function connect() {
   http.get('http://localhost:9222/json/list', (res) => {
@@ -92,6 +95,39 @@ function startLogging(wsUrl) {
       if (text.includes('DISCREPANCY')) currentHand.issues.push('DISCREPANCY: ' + text.substring(0, 80));
       if (text.includes('mismatch')) currentHand.issues.push('MISMATCH: ' + text.substring(0, 80));
       if (text.includes('null') && text.includes('upRank')) currentHand.issues.push('NULL_UPRANK');
+    }
+
+    // Track drift changes - log when wager or net diff changes
+    if (text.includes('[SBJ COMPARE]')) {
+      const wagerMatch = text.match(/OurWager: ([\d.]+) StakeWager: ([\d.]+) Diff: ([\d.-]+)/);
+      const netMatch = text.match(/OurNet: ([\d.-]+) StakeNet: ([\d.-]+) Diff: ([\d.-]+)/);
+
+      if (wagerMatch && netMatch) {
+        const wagerDiff = parseFloat(wagerMatch[3]);
+        const netDiff = parseFloat(netMatch[3]);
+
+        // Log if drift changed
+        if (Math.abs(wagerDiff - lastWagerDiff) > 0.01 || Math.abs(netDiff - lastNetDiff) > 0.01) {
+          const driftEntry = {
+            time: time,
+            hand: currentHand ? currentHand.cards + ' vs ' + currentHand.dealer : 'unknown',
+            ourWager: parseFloat(wagerMatch[1]),
+            stakeWager: parseFloat(wagerMatch[2]),
+            wagerDiff: wagerDiff,
+            prevWagerDiff: lastWagerDiff,
+            ourNet: parseFloat(netMatch[1]),
+            stakeNet: parseFloat(netMatch[2]),
+            netDiff: netDiff,
+            prevNetDiff: lastNetDiff,
+            fullLog: text
+          };
+          fs.appendFileSync(DRIFT_LOG, JSON.stringify(driftEntry) + '\n');
+          console.log('⚠️  DRIFT CHANGED:', 'Wager:', lastWagerDiff, '->', wagerDiff, '| Net:', lastNetDiff, '->', netDiff);
+
+          lastWagerDiff = wagerDiff;
+          lastNetDiff = netDiff;
+        }
+      }
     }
 
     // Save hand when new one starts
