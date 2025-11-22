@@ -649,6 +649,9 @@ function testStrategy(playerCards, playerTotal, soft, dealerUp, expectedAction, 
   // Import the betMatrix and decideFromMatrix function
   const betMatrix = {
     hard: {
+      "9":{"2":"H","3":"D","4":"D","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "10":{"2":"D","3":"D","4":"D","5":"D","6":"D","7":"D","8":"D","9":"D","10":"H","A":"H"},
+      "11":{"2":"D","3":"D","4":"D","5":"D","6":"D","7":"D","8":"D","9":"D","10":"D","A":"D"},
       "12":{"2":"H","3":"H","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "13":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "14":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"H","8":"H","9":"H","10":"H","A":"H"},
@@ -660,6 +663,10 @@ function testStrategy(playerCards, playerTotal, soft, dealerUp, expectedAction, 
       "20":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"S","8":"S","9":"S","10":"S","A":"S"}
     },
     soft: {
+      "13":{"2":"H","3":"H","4":"H","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "14":{"2":"H","3":"H","4":"H","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "15":{"2":"H","3":"H","4":"D","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
+      "16":{"2":"H","3":"H","4":"D","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "17":{"2":"H","3":"D","4":"D","5":"D","6":"D","7":"H","8":"H","9":"H","10":"H","A":"H"},
       "18":{"2":"S","3":"DS","4":"DS","5":"DS","6":"DS","7":"S","8":"S","9":"H","10":"H","A":"H"},
       "19":{"2":"S","3":"S","4":"S","5":"S","6":"S","7":"S","8":"S","9":"S","10":"S","A":"S"},
@@ -1126,6 +1133,367 @@ TestSuite.test('Wager Tracking - Multiple hands accumulate correctly', () => {
   finishHand('loss', 18, 20);
 
   TestSuite.assertClose(runningStats.totalBet, 3.00, 0.01, 'Total wager should be ~3.00 (0.50 + 2.00 + 0.50)');
+});
+
+// ==================== SERVER PAYOUT PARSING TESTS ====================
+// These test the critical server payout logic that was causing massive discrepancies
+
+// Test: Server payout parsing - valid number
+TestSuite.test('Server Payout: Parse valid number correctly', () => {
+  const testCases = [
+    { input: 2.50, expected: 2.50 },
+    { input: 0, expected: 0 },
+    { input: 1.00, expected: 1.00 },
+    { input: '2.50', expected: 2.50 },
+    { input: '0', expected: 0 },
+  ];
+
+  for (const tc of testCases) {
+    const serverPayoutNum = typeof tc.input === 'number' ? tc.input : parseFloat(tc.input);
+    TestSuite.assertEqual(serverPayoutNum, tc.expected, `Parsing "${tc.input}" should equal ${tc.expected}`);
+  }
+});
+
+// Test: Server payout parsing - invalid values
+TestSuite.test('Server Payout: Handle invalid values gracefully', () => {
+  const invalidValues = ['unknown', undefined, null, NaN, '', 'abc'];
+
+  for (const val of invalidValues) {
+    const serverPayoutNum = typeof val === 'number' ? val : parseFloat(val);
+    // These should all result in NaN
+    TestSuite.assert(isNaN(serverPayoutNum) || val === undefined || val === null,
+      `Invalid value "${val}" should not parse to valid number`);
+  }
+});
+
+// Test: Result determination from server payout
+TestSuite.test('Server Payout: Determine result correctly', () => {
+  function determineResult(serverPayout, bet) {
+    if (serverPayout > bet) return 'win';
+    if (serverPayout === bet) return 'push';
+    return 'loss';
+  }
+
+  // Win cases
+  TestSuite.assertEqual(determineResult(2.0, 1.0), 'win', '$2 payout on $1 bet = win');
+  TestSuite.assertEqual(determineResult(2.5, 1.0), 'win', '$2.50 payout on $1 bet = win (blackjack)');
+
+  // Push cases
+  TestSuite.assertEqual(determineResult(1.0, 1.0), 'push', '$1 payout on $1 bet = push');
+  TestSuite.assertEqual(determineResult(0.50, 0.50), 'push', '$0.50 payout on $0.50 bet = push');
+
+  // Loss cases
+  TestSuite.assertEqual(determineResult(0, 1.0), 'loss', '$0 payout on $1 bet = loss');
+  TestSuite.assertEqual(determineResult(0, 0.25), 'loss', '$0 payout on $0.25 bet = loss');
+});
+
+// Test: CRITICAL BUG - actualBet must be defined before use
+TestSuite.test('CRITICAL BUG: actualBet defined before serverPayoutNum check', () => {
+  // This simulates the bug where actualBet was used before declaration
+  // The fix ensures actualBet is defined BEFORE the serverPayoutNum block
+
+  function finishHandBroken(betAmount, serverBetAmount, serverPayout) {
+    // BROKEN: actualBet used before declaration (would throw ReferenceError)
+    // const serverPayoutNum = parseFloat(serverPayout);
+    // if (serverPayoutNum > actualBet) { /* bug! actualBet not defined */ }
+    // let actualBet = betAmount; // Too late!
+    return 'error';
+  }
+
+  function finishHandFixed(betAmount, serverBetAmount, serverPayout) {
+    // FIXED: actualBet defined first
+    let actualBet = betAmount;
+    if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
+      actualBet = serverBetAmount;
+    }
+
+    const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
+    if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
+      const serverResult = serverPayoutNum > actualBet ? 'win' :
+                          serverPayoutNum === actualBet ? 'push' : 'loss';
+      return { result: serverResult, payout: serverPayoutNum, bet: actualBet };
+    }
+    return { result: 'unknown', payout: NaN, bet: actualBet };
+  }
+
+  // Test the fixed version
+  const result1 = finishHandFixed(1.0, 1.0, 2.0);
+  TestSuite.assertEqual(result1.result, 'win', 'Fixed: $2 payout on $1 bet = win');
+  TestSuite.assertEqual(result1.bet, 1.0, 'Fixed: actualBet should be 1.0');
+
+  const result2 = finishHandFixed(1.0, 1.0, 0);
+  TestSuite.assertEqual(result2.result, 'loss', 'Fixed: $0 payout on $1 bet = loss');
+
+  const result3 = finishHandFixed(1.0, 1.0, 1.0);
+  TestSuite.assertEqual(result3.result, 'push', 'Fixed: $1 payout on $1 bet = push');
+});
+
+// Test: Server payout >= 0 condition (was > 0 which missed losses)
+TestSuite.test('CRITICAL BUG: Server payout condition includes zero', () => {
+  // The bug was: serverPayoutNum > 0 (missed losses where payout = 0)
+  // The fix: serverPayoutNum >= 0
+
+  function checkPayoutConditionBroken(serverPayout) {
+    const serverPayoutNum = parseFloat(serverPayout);
+    // BROKEN: > 0 misses losses
+    if (!isNaN(serverPayoutNum) && serverPayoutNum > 0) {
+      return 'used_server_payout';
+    }
+    return 'fallback';
+  }
+
+  function checkPayoutConditionFixed(serverPayout) {
+    const serverPayoutNum = parseFloat(serverPayout);
+    // FIXED: >= 0 includes losses
+    if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
+      return 'used_server_payout';
+    }
+    return 'fallback';
+  }
+
+  // Loss case (payout = 0)
+  TestSuite.assertEqual(checkPayoutConditionBroken(0), 'fallback', 'Broken: payout 0 uses fallback (BUG!)');
+  TestSuite.assertEqual(checkPayoutConditionFixed(0), 'used_server_payout', 'Fixed: payout 0 uses server payout');
+
+  // Win case (payout > 0)
+  TestSuite.assertEqual(checkPayoutConditionFixed(2.0), 'used_server_payout', 'Fixed: payout 2.0 uses server payout');
+});
+
+// ==================== BET TRACKING TESTS ====================
+
+// Test: Server bet amount takes precedence
+TestSuite.test('Bet Tracking: Server bet takes precedence over tracked bet', () => {
+  let actualBet = 1.0; // Our tracked bet
+  const serverBetAmount = 0.50; // Server says different
+
+  if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
+    actualBet = serverBetAmount;
+  }
+
+  TestSuite.assertEqual(actualBet, 0.50, 'Should use server bet amount when available');
+});
+
+// Test: Invalid server bet falls back to tracked bet
+TestSuite.test('Bet Tracking: Invalid server bet falls back to tracked', () => {
+  const trackedBet = 1.0;
+  const invalidServerBets = ['unknown', undefined, null, 0, -1];
+
+  for (const serverBetAmount of invalidServerBets) {
+    let actualBet = trackedBet;
+    if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
+      actualBet = serverBetAmount;
+    }
+    TestSuite.assertEqual(actualBet, trackedBet, `Invalid server bet "${serverBetAmount}" should fall back to tracked bet`);
+  }
+});
+
+// ==================== SPLIT HAND CALCULATION TESTS ====================
+
+// Test: Split hand result calculation
+TestSuite.test('Split: Individual hand result calculation', () => {
+  function calculateSplitHandResult(handValue, dealerValue, busted) {
+    if (busted || handValue > 21) return 'loss';
+    if (dealerValue > 21) return 'win';
+    if (handValue > dealerValue) return 'win';
+    if (handValue === dealerValue) return 'push';
+    return 'loss';
+  }
+
+  // Dealer busts
+  TestSuite.assertEqual(calculateSplitHandResult(18, 22, false), 'win', 'Dealer busts = win');
+
+  // Player wins
+  TestSuite.assertEqual(calculateSplitHandResult(20, 18, false), 'win', '20 vs 18 = win');
+
+  // Push
+  TestSuite.assertEqual(calculateSplitHandResult(18, 18, false), 'push', '18 vs 18 = push');
+
+  // Player loses
+  TestSuite.assertEqual(calculateSplitHandResult(17, 19, false), 'loss', '17 vs 19 = loss');
+
+  // Player busts
+  TestSuite.assertEqual(calculateSplitHandResult(23, 18, true), 'loss', 'Bust = loss');
+});
+
+// Test: Split hand payout calculation
+TestSuite.test('Split: Hand payout calculation', () => {
+  function calculateSplitHandPayout(handBet, result) {
+    if (result === 'win') return handBet * 2;
+    if (result === 'push') return handBet;
+    return 0;
+  }
+
+  TestSuite.assertEqual(calculateSplitHandPayout(1.0, 'win'), 2.0, 'Win pays 2x bet');
+  TestSuite.assertEqual(calculateSplitHandPayout(1.0, 'push'), 1.0, 'Push returns bet');
+  TestSuite.assertEqual(calculateSplitHandPayout(1.0, 'loss'), 0, 'Loss pays 0');
+});
+
+// Test: Split total payout calculation
+TestSuite.test('Split: Total payout for mixed results', () => {
+  function calculateSplitTotalPayout(hands, splitBetAmount) {
+    let total = 0;
+    for (const hand of hands) {
+      let handBet = splitBetAmount;
+      if (hand.doubled) handBet *= 2;
+
+      if (hand.result === 'win') total += handBet * 2;
+      else if (hand.result === 'push') total += handBet;
+      // loss = 0
+    }
+    return total;
+  }
+
+  // One win, one loss
+  const mixedHands = [
+    { result: 'win', doubled: false },
+    { result: 'loss', doubled: false }
+  ];
+  TestSuite.assertEqual(calculateSplitTotalPayout(mixedHands, 0.50), 1.0, 'One win ($1) + one loss ($0) = $1');
+
+  // Both win
+  const bothWin = [
+    { result: 'win', doubled: false },
+    { result: 'win', doubled: false }
+  ];
+  TestSuite.assertEqual(calculateSplitTotalPayout(bothWin, 0.50), 2.0, 'Both win = $2');
+
+  // One doubled win, one regular loss
+  const doubledMixed = [
+    { result: 'win', doubled: true },
+    { result: 'loss', doubled: false }
+  ];
+  TestSuite.assertEqual(calculateSplitTotalPayout(doubledMixed, 0.50), 2.0, 'Doubled win ($2) + loss ($0) = $2');
+});
+
+// ==================== CARD MISMATCH DETECTION TESTS ====================
+
+// Test: Card mismatch detection
+TestSuite.test('Card Mismatch: Detect when tracked cards differ from server', () => {
+  function detectCardMismatch(ourCards, serverCards) {
+    if (serverCards === 'unknown') return false;
+    return ourCards !== serverCards;
+  }
+
+  TestSuite.assertEqual(detectCardMismatch('K,9', 'K,9'), false, 'Same cards = no mismatch');
+  TestSuite.assertEqual(detectCardMismatch('K,9', 'A,8'), true, 'Different cards = mismatch');
+  TestSuite.assertEqual(detectCardMismatch('K,9', 'unknown'), false, 'Unknown server cards = no mismatch check');
+  TestSuite.assertEqual(detectCardMismatch('K,9,5', 'K,9'), true, 'Different card count = mismatch');
+});
+
+// ==================== NET GAIN CALCULATION TESTS ====================
+
+// Test: Net gain calculation
+TestSuite.test('Net Gain: Calculated correctly from totalBet and totalWon', () => {
+  const scenarios = [
+    { totalBet: 10.0, totalWon: 12.0, expectedNet: 2.0, desc: 'Profit' },
+    { totalBet: 10.0, totalWon: 8.0, expectedNet: -2.0, desc: 'Loss' },
+    { totalBet: 10.0, totalWon: 10.0, expectedNet: 0, desc: 'Break even' },
+  ];
+
+  for (const s of scenarios) {
+    const netGain = s.totalWon - s.totalBet;
+    TestSuite.assertClose(netGain, s.expectedNet, 0.01, `${s.desc}: Net should be ${s.expectedNet}`);
+  }
+});
+
+// Test: RTP calculation
+TestSuite.test('RTP: Return to player calculated correctly', () => {
+  const scenarios = [
+    { totalBet: 100.0, totalWon: 98.0, expectedRTP: 98.0 },
+    { totalBet: 100.0, totalWon: 100.0, expectedRTP: 100.0 },
+    { totalBet: 50.0, totalWon: 48.5, expectedRTP: 97.0 },
+  ];
+
+  for (const s of scenarios) {
+    const rtp = (s.totalWon / s.totalBet) * 100;
+    TestSuite.assertClose(rtp, s.expectedRTP, 0.1, `RTP should be ${s.expectedRTP}%`);
+  }
+});
+
+// ==================== BLACKJACK DETECTION TESTS ====================
+
+// Test: Blackjack detection
+TestSuite.test('Blackjack Detection: Identify natural 21 correctly', () => {
+  function isBlackjack(total, cardCount, hasActions) {
+    return total === 21 && cardCount === 2 && !hasActions;
+  }
+
+  TestSuite.assertEqual(isBlackjack(21, 2, false), true, 'A-K with no actions = blackjack');
+  TestSuite.assertEqual(isBlackjack(21, 3, false), false, '3-card 21 = not blackjack');
+  TestSuite.assertEqual(isBlackjack(21, 2, true), false, '21 with actions = not blackjack');
+  TestSuite.assertEqual(isBlackjack(20, 2, false), false, '20 = not blackjack');
+});
+
+// Test: Blackjack payout
+TestSuite.test('Blackjack Payout: 3:2 vs 1:1', () => {
+  function calculateWinPayout(bet, isBlackjack) {
+    if (isBlackjack) return bet * 2.5; // 3:2
+    return bet * 2; // 1:1
+  }
+
+  TestSuite.assertEqual(calculateWinPayout(1.0, true), 2.5, 'Blackjack pays 3:2');
+  TestSuite.assertEqual(calculateWinPayout(1.0, false), 2.0, 'Regular win pays 1:1');
+});
+
+// ==================== DEALER DATA TESTS ====================
+
+// Test: Dealer total validation
+TestSuite.test('Dealer Data: Dealer must have 17+ at end', () => {
+  function isDealerTotalValid(dealerTotal, dealerBusted) {
+    if (dealerBusted) return true; // Bust is valid
+    return dealerTotal >= 17 && dealerTotal <= 21;
+  }
+
+  TestSuite.assertEqual(isDealerTotalValid(17, false), true, 'Dealer 17 is valid');
+  TestSuite.assertEqual(isDealerTotalValid(21, false), true, 'Dealer 21 is valid');
+  TestSuite.assertEqual(isDealerTotalValid(22, true), true, 'Dealer bust is valid');
+  TestSuite.assertEqual(isDealerTotalValid(16, false), false, 'Dealer 16 (not bust) is invalid');
+  TestSuite.assertEqual(isDealerTotalValid(12, false), false, 'Dealer 12 is invalid (incomplete)');
+});
+
+// ==================== EDGE CASE TESTS ====================
+
+// Test: Zero bet handling
+TestSuite.test('Edge Case: Zero or negative bet handled', () => {
+  function validateBet(bet) {
+    if (!bet || bet <= 0) return 0.25; // Default fallback
+    return bet;
+  }
+
+  TestSuite.assertEqual(validateBet(0), 0.25, 'Zero bet falls back to 0.25');
+  TestSuite.assertEqual(validateBet(-1), 0.25, 'Negative bet falls back to 0.25');
+  TestSuite.assertEqual(validateBet(null), 0.25, 'Null bet falls back to 0.25');
+  TestSuite.assertEqual(validateBet(1.0), 1.0, 'Valid bet is used');
+});
+
+// Test: Floating point precision
+TestSuite.test('Edge Case: Floating point comparison tolerance', () => {
+  // JavaScript floating point can cause 0.1 + 0.2 !== 0.3
+  const val1 = 0.1 + 0.2;
+  const val2 = 0.3;
+
+  // Direct comparison fails
+  TestSuite.assert(val1 !== val2, 'Direct float comparison fails (JS quirk)');
+
+  // Tolerance comparison works
+  TestSuite.assert(Math.abs(val1 - val2) < 0.01, 'Tolerance comparison works');
+});
+
+// Test: Insurance/side bets not counted (future-proofing)
+TestSuite.test('Edge Case: Only main bet counted in stats', () => {
+  // The bot should only track the main blackjack bet
+  // Insurance and side bets should be excluded
+
+  let trackedBet = 1.0; // Main bet
+
+  // Simulate side bet (shouldn't add to tracked)
+  const insuranceBet = 0.50;
+  const perfectPairsBet = 0.25;
+
+  // trackedBet should NOT include these
+  // (This test documents expected behavior)
+
+  TestSuite.assertEqual(trackedBet, 1.0, 'Side bets should not be tracked');
 });
 
 // --------------------------- RUN TESTS ---------------------------

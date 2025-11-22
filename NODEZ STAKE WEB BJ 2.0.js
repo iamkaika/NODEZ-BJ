@@ -64,7 +64,10 @@
     return null;
   }
 
+  let _handCounter = 0; // Unique hand counter to prevent ID collisions
+
   function startNewHand(playerCards, dealerUp, betAmount = null) {
+    _handCounter++;
     // Try to extract bet amount from UI first, then server state, then default
     if (!betAmount) {
       betAmount = getBetAmountFromUI();
@@ -80,6 +83,7 @@
     }
 
     currentHand = {
+      handId: _handCounter, // Unique ID for this hand
       startTime: new Date().toLocaleTimeString(),
       playerStart: playerCards.join(','),
       dealerUp: dealerUp,
@@ -128,7 +132,7 @@
   }
 
   // Wait for valid dealer data before finishing hand
-  async function waitForDealerData(playerTotal, maxAttempts = 10) {
+  async function waitForDealerData(playerTotal, maxAttempts = 20) {
     const playerBusted = playerTotal > 21;
     const playerHasBJ = playerTotal === 21; // Might be natural BJ
 
@@ -163,19 +167,32 @@
         return dealerTotal;
       }
 
-      // Wait and retry
-      await new Promise(r => setTimeout(r, 150));
+      // Wait and retry (300ms total between attempts)
+      await new Promise(r => setTimeout(r, 200));
 
       // Force re-read by triggering a small delay for network
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 100));
     }
 
     console.log('[SBJ DEBUG] Timed out waiting for dealer data');
     return null;
   }
 
+  let _lastFinishedHandId = null; // Track to prevent double-counting
+
   function finishHand(result, finalPlayerTotal, finalDealerTotal) {
     if (currentHand) {
+      // Use unique hand counter to prevent double-counting
+      const handId = currentHand.handId;
+
+      if (handId === _lastFinishedHandId) {
+        console.warn('[SBJ WARNING] Duplicate finishHand call blocked for hand #' + handId);
+        currentHand = null;
+        return;
+      }
+      _lastFinishedHandId = handId;
+      console.log('[SBJ DEBUG] Finishing hand #' + handId);
+
       // Get fresh server state for accurate data
       const freshBj = deepFindBlackjack(_lastBJRaw);
       const freshServerHand = freshBj?.state?.player?.[0];
@@ -202,16 +219,8 @@
 
       if (dealerTotalSeemsIncomplete) {
         if (dealerShouldHavePlayed) {
-          // Bug: We have stale dealer data. Log it but keep the value for debugging.
-          console.error('[SBJ BUG] Dealer total < 17 but dealer should have played!',
-            'playerTotal:', actualPlayerTotal, 'dealerTotal:', actualDealerTotal);
-          LiveValidator.logDiscrepancy({
-            type: 'DEALER_DATA_STALE',
-            timestamp: new Date().toISOString(),
-            playerTotal: actualPlayerTotal,
-            dealerTotal: actualDealerTotal,
-            message: `Dealer total ${actualDealerTotal} < 17 but player didn't bust (${actualPlayerTotal}). Stale data.`
-          });
+          // Stale dealer data - server payout will be used for actual result
+          console.log('[SBJ INFO] Dealer data incomplete (total:', actualDealerTotal, ') - using server payout for result');
         } else {
           // Dealer legitimately didn't play (player bust or natural BJ)
           console.log('[SBJ DEBUG] Dealer didnt play - player:', playerBusted ? 'bust' : 'natural BJ');
@@ -241,17 +250,27 @@
       console.log('[SBJ DEBUG] Full blackjack data for payout detection:', bj);
 
       // Look for win amount in various possible locations
-      const payout = bj?.payout || bj?.winAmount || bj?.totalWin || bj?.amount || 0;
-      const profit = bj?.profit || bj?.netWin || 0;
+      // IMPORTANT: Use typeof checks, not ||, because 0 is a valid payout for losses!
+      const payout = (typeof bj?.payout === 'number') ? bj.payout :
+                     (typeof bj?.winAmount === 'number') ? bj.winAmount :
+                     (typeof bj?.totalWin === 'number') ? bj.totalWin : 0;
+      const profit = (typeof bj?.profit === 'number') ? bj.profit :
+                     (typeof bj?.netWin === 'number') ? bj.netWin : 0;
       const betAmount = currentHand.betAmount;
 
       console.log('[SBJ DEBUG] Payout detection - payout:', payout, 'profit:', profit, 'betAmount:', betAmount, 'result:', result);
       console.log('[SBJ DEBUG] Current hand details - isSplit:', currentHand.isSplit, 'splitBetAmount:', currentHand.splitBetAmount);
 
       // SERVER COMPARISON: Log what server actually says
-      const serverBetAmount = bj?.bet?.amount || bj?.betAmount || 'unknown';
-      const serverPayout = bj?.payout || bj?.winAmount || bj?.totalWin || 'unknown';
-      const serverProfit = bj?.profit || bj?.netWin || 'unknown';
+      // Use typeof checks because 0 is a valid value!
+      const serverBetAmount = (typeof bj?.bet?.amount === 'number') ? bj.bet.amount :
+                              (typeof bj?.betAmount === 'number') ? bj.betAmount :
+                              (typeof bj?.amount === 'number') ? bj.amount : 'unknown';
+      const serverPayout = (typeof bj?.payout === 'number') ? bj.payout :
+                           (typeof bj?.winAmount === 'number') ? bj.winAmount :
+                           (typeof bj?.totalWin === 'number') ? bj.totalWin : 'unknown';
+      const serverProfit = (typeof bj?.profit === 'number') ? bj.profit :
+                           (typeof bj?.netWin === 'number') ? bj.netWin : 'unknown';
 
       // Get server's view of player cards
       const serverPlayerHand = bj?.state?.player?.[0];
@@ -280,34 +299,26 @@
         console.log('[SBJ DEBUG] Using server bet amount:', actualBet);
       }
 
-      // CRITICAL: Determine result from server payout, not our calculation
-      // Server payout is the authoritative source
+      // CRITICAL: Determine result from server payout FIRST - it's the authoritative source
+      // Only fall back to our calculation if server payout is unavailable
       const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
       if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
+        // Server payout available - use it to determine result (authoritative)
         const serverResult = serverPayoutNum > actualBet ? 'win' :
                             serverPayoutNum === actualBet ? 'push' : 'loss';
+
+        // Only log as info if different (not as error - server is authoritative)
         if (serverResult !== result) {
-          console.error('[SBJ DISCREPANCY] Result mismatch! We calculated:', result, 'but server payout suggests:', serverResult);
-          console.error('[SBJ DISCREPANCY] Server payout:', serverPayoutNum, 'vs bet:', actualBet);
-          // Use server result as authoritative
-          result = serverResult;
-          currentHand.result = result;
-          LiveValidator.logDiscrepancy({
-            type: 'RESULT_MISMATCH',
-            timestamp: new Date().toISOString(),
-            ourResult: currentHand.result,
-            serverResult: serverResult,
-            serverPayout: serverPayoutNum,
-            bet: actualBet,
-            message: `Result mismatch: we said ${currentHand.result} but server payout $${serverPayoutNum} suggests ${serverResult}`
-          });
+          console.log('[SBJ INFO] Result from server payout:', serverResult, '(our calc was:', result + ')');
         }
-      } else if (serverPayoutNum === 0 && result !== 'loss') {
-        // Server paid 0, should be a loss
-        console.error('[SBJ DISCREPANCY] Server paid $0 but we calculated:', result);
+        result = serverResult;
+        currentHand.result = result;
+      } else if (serverPayoutNum === 0) {
+        // Server paid 0 = loss
         result = 'loss';
         currentHand.result = result;
       }
+      // If no server payout available, keep our calculated result as fallback
 
       // Check if our tracked cards match server cards
       if (serverCards !== 'unknown' && currentHand.playerStart !== serverCards) {
@@ -327,18 +338,10 @@
         currentHand.playerStart = serverCards;
       }
 
-      // Log bet mismatch if our tracked bet differs from server
+      // Log bet adjustment if our tracked bet differs from server (info only, server is authoritative)
       if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
         if (Math.abs(serverBetAmount - betAmount) > 0.01) {
-          console.error('[SBJ DISCREPANCY] Bet mismatch! Our bet:', betAmount, 'Server bet:', serverBetAmount);
-          LiveValidator.logDiscrepancy({
-            type: 'BET_MISMATCH',
-            timestamp: new Date().toISOString(),
-            ourBet: betAmount,
-            serverBet: serverBetAmount,
-            difference: serverBetAmount - betAmount,
-            message: `Bet mismatch: we tracked $${betAmount.toFixed(2)} but server says $${serverBetAmount}`
-          });
+          console.log('[SBJ INFO] Bet adjustment: tracked', betAmount, '-> server says', serverBetAmount);
         }
       }
 
@@ -444,14 +447,14 @@
         console.log('[SBJ DEBUG] Loss - bet:', betAmount, 'winAmount:', winAmount);
       }
 
-      // SERVER PAYOUT: Use server payout as authoritative if available
+      // SERVER PAYOUT: ALWAYS use server payout as authoritative if available
+      // This is the most reliable source of truth
       if (!isNaN(serverPayoutNum) && serverPayoutNum >= 0) {
         if (Math.abs(winAmount - serverPayoutNum) > 0.01) {
-          console.error('[SBJ DISCREPANCY] Payout mismatch! Our calc:', winAmount, 'Server payout:', serverPayoutNum);
-          console.log('[SBJ FIX] Using server payout instead of our calculation');
-          // Use server payout as authoritative
-          winAmount = serverPayoutNum;
+          console.log('[SBJ FIX] Payout adjustment: our calc was', winAmount, '-> using server payout:', serverPayoutNum);
         }
+        // ALWAYS use server payout regardless of our calculation
+        winAmount = serverPayoutNum;
       }
 
       currentHand.winAmount = winAmount;
@@ -490,15 +493,47 @@
       // Store action summary before clearing currentHand
       const actionSummary = currentHand.actions.map(a => a.action).join(',');
 
-      // For running stats, always use the betAmount field which should reflect total wagered
-      // (including splits and doubles as they get updated)
-      const actualBetAmount = currentHand.betAmount;
+      // For running stats, prefer server bet amount over our tracked bet
+      // Server is authoritative source for actual wager
+      let actualBetAmount = currentHand.betAmount;
+      if (typeof serverBetAmount === 'number' && serverBetAmount > 0) {
+        if (Math.abs(actualBetAmount - serverBetAmount) > 0.01) {
+          console.log('[SBJ FIX] Bet adjustment: our tracked bet was', actualBetAmount, '-> using server bet:', serverBetAmount);
+        }
+        actualBetAmount = serverBetAmount;
+      }
 
       handHistory.push(currentHand);
 
       // Update running totals for money-based RTP using the final bet amount
       runningStats.totalBet += actualBetAmount;
       runningStats.totalWon += winAmount;
+
+      // NET GAIN TRACKING: Log comparison between our calc and server
+      const ourNet = winAmount - actualBetAmount;
+      const serverNet = (typeof serverPayoutNum === 'number' && !isNaN(serverPayoutNum))
+        ? serverPayoutNum - actualBetAmount
+        : 'unknown';
+      const runningNet = runningStats.totalWon - runningStats.totalBet;
+
+      // Read Stake's official UI stats for comparison
+      const stakeNetEl = document.querySelector('[data-testid="bets-stats-profit"]');
+      const stakeWagerEl = document.querySelector('[data-testid="bets-stats-wagered"]');
+      const stakeNet = stakeNetEl ? parseFloat(stakeNetEl.textContent.replace(/,/g, '')) : null;
+      const stakeWager = stakeWagerEl ? parseFloat(stakeWagerEl.textContent.replace(/,/g, '')) : null;
+
+      const wagerDiff = stakeWager !== null ? (runningStats.totalBet - stakeWager).toFixed(2) : '?';
+      const netDiff = stakeNet !== null ? (runningNet - stakeNet).toFixed(2) : '?';
+
+      console.log('[SBJ NET] Hand:', currentHand.playerStart, 'vs', currentHand.dealerUp,
+        '| Result:', result,
+        '| Bet:', actualBetAmount,
+        '| Payout:', winAmount,
+        '| OurNet:', ourNet.toFixed(2),
+        '| ServerNet:', typeof serverNet === 'number' ? serverNet.toFixed(2) : serverNet,
+        '| RunningNet:', runningNet.toFixed(2));
+      console.log('[SBJ COMPARE] OurWager:', runningStats.totalBet.toFixed(2), 'StakeWager:', stakeWager, 'Diff:', wagerDiff,
+        '| OurNet:', runningNet.toFixed(2), 'StakeNet:', stakeNet, 'Diff:', netDiff);
 
       // Update total win display
       SBJ._updateTotalWin();
