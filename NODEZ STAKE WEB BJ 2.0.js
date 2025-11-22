@@ -263,6 +263,15 @@
       console.log('[SBJ SERVER] Server cards:', serverCards, 'total:', serverTotal, 'count:', serverCardCount);
       console.log('[SBJ COMPARE] Our cards:', currentHand.playerStart, 'Server cards:', serverCards);
 
+      // DEBUG: Log all available fields on bj object to find payout
+      if (bj) {
+        console.log('[SBJ DEBUG] All bj keys:', Object.keys(bj));
+        console.log('[SBJ DEBUG] bj.payout:', bj.payout, 'bj.winAmount:', bj.winAmount, 'bj.totalWin:', bj.totalWin);
+        console.log('[SBJ DEBUG] bj.profit:', bj.profit, 'bj.netWin:', bj.netWin, 'bj.amount:', bj.amount);
+        if (bj.payouts) console.log('[SBJ DEBUG] bj.payouts:', bj.payouts);
+        if (bj.win) console.log('[SBJ DEBUG] bj.win:', bj.win);
+      }
+
       // CRITICAL: Determine result from server payout, not our calculation
       // Server payout is the authoritative source
       const serverPayoutNum = typeof serverPayout === 'number' ? serverPayout : parseFloat(serverPayout);
