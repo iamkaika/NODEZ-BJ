@@ -589,8 +589,7 @@
       }
 
       // DEDUP: Record this hand's key to prevent re-starting it
-      const startCards = currentHand.playerStart.split(',').slice(0, 2).join(',');
-      _lastFinishedHandKey = startCards + ' vs ' + currentHand.dealerUp;
+      _lastFinishedHandKey = currentHandKey;
       _lastFinishedTime = Date.now();
 
       // Clear currentHand after using all its data
