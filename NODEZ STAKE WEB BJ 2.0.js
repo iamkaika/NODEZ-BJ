@@ -67,6 +67,7 @@
   let _handCounter = 0; // Unique hand counter to prevent ID collisions
   let _lastFinishedHandKey = null; // Track last finished hand to prevent double-counting
   let _lastFinishedTime = 0;
+  let _consecutiveDriftCount = 0; // Track consecutive hands with drift for auto-resync
 
   function startNewHand(playerCards, dealerUp, betAmount = null) {
     // DEDUP: Check if this matches a recently finished hand (within 3 seconds)
@@ -93,11 +94,32 @@
       const stakeWager = stakeWagerEl ? parseFloat(stakeWagerEl.textContent.replace(/,/g, '')) : null;
       const runningNet = runningStats.totalWon - runningStats.totalBet;
 
-      const wagerDiff = stakeWager !== null ? (runningStats.totalBet - stakeWager).toFixed(2) : '?';
-      const netDiff = stakeNet !== null ? (runningNet - stakeNet).toFixed(2) : '?';
+      const wagerDiffNum = stakeWager !== null ? runningStats.totalBet - stakeWager : null;
+      const netDiffNum = stakeNet !== null ? runningNet - stakeNet : null;
+      const wagerDiff = wagerDiffNum !== null ? wagerDiffNum.toFixed(2) : '?';
+      const netDiff = netDiffNum !== null ? netDiffNum.toFixed(2) : '?';
 
       console.log('[SBJ COMPARE] OurWager:', runningStats.totalBet.toFixed(2), 'StakeWager:', stakeWager, 'Diff:', wagerDiff,
         '| OurNet:', runningNet.toFixed(2), 'StakeNet:', stakeNet, 'Diff:', netDiff);
+
+      // AUTO-RESYNC: If drift persists for 10 consecutive hands, resync to Stake values
+      const hasDrift = (wagerDiffNum !== null && Math.abs(wagerDiffNum) > 0.01) ||
+                       (netDiffNum !== null && Math.abs(netDiffNum) > 0.01);
+
+      if (hasDrift) {
+        _consecutiveDriftCount++;
+        if (_consecutiveDriftCount >= 10 && stakeWager !== null && stakeNet !== null) {
+          console.warn('[SBJ RESYNC] Persistent drift detected for 10 hands - resyncing to Stake values');
+          console.warn('[SBJ RESYNC] Before: totalBet=' + runningStats.totalBet + ' totalWon=' + runningStats.totalWon);
+          // Resync: set our totalBet to Stake's wager, and calculate totalWon from Stake's net
+          runningStats.totalBet = stakeWager;
+          runningStats.totalWon = stakeWager + stakeNet; // net = won - bet, so won = bet + net
+          console.warn('[SBJ RESYNC] After: totalBet=' + runningStats.totalBet + ' totalWon=' + runningStats.totalWon);
+          _consecutiveDriftCount = 0;
+        }
+      } else {
+        _consecutiveDriftCount = 0; // Reset counter when synced
+      }
     }
 
     // Try to extract bet amount from UI first, then server state, then default
