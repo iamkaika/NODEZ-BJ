@@ -88,8 +88,18 @@
     // COMPARE to Stake UI at START of new hand (gives Stake time to update from previous hand)
     // Only compare if we have previous hands to compare
     if (runningStats.totalHands > 0) {
-      const stakeNetEl = document.querySelector('[data-testid="bets-stats-profit"]');
-      const stakeWagerEl = document.querySelector('[data-testid="bets-stats-wagered"]');
+      let stakeNetEl = document.querySelector('[data-testid="bets-stats-profit"]');
+      let stakeWagerEl = document.querySelector('[data-testid="bets-stats-wagered"]');
+
+      // AUTO-OPEN: If stats elements not found, try to open the stats panel
+      if (!stakeNetEl || !stakeWagerEl) {
+        const statsBtn = document.querySelector('[data-ds-icon="Stats"]')?.closest('button');
+        if (statsBtn) {
+          console.log('[SBJ] Stats panel not open - clicking stats button');
+          statsBtn.click();
+        }
+      }
+
       const stakeNet = stakeNetEl ? parseFloat(stakeNetEl.textContent.replace(/,/g, '')) : null;
       const stakeWager = stakeWagerEl ? parseFloat(stakeWagerEl.textContent.replace(/,/g, '')) : null;
       const runningNet = runningStats.totalWon - runningStats.totalBet;
