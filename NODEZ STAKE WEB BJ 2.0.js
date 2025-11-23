@@ -2290,22 +2290,28 @@
           // Double is typically available on all 2-card hands (unless blackjack or special rules)
           const shouldHaveDouble = v.total !== 21; // Not blackjack
 
+          // For 11, double is ALWAYS optimal - wait much longer
+          // For 10, double is optimal vs most dealer cards - wait longer
+          // Poll every 10ms for fast response, adjust iterations accordingly
+          const pollInterval = 10;
+          const maxDoubleWait = (v.total === 11) ? 100 : (v.total === 10) ? 75 : 25; // 1000ms / 750ms / 250ms
+
           if (shouldHaveDouble) {
-            // Wait a bit longer for double button to appear
+            // Poll rapidly for double button to appear
             let foundDouble = false;
-            for (let doubleWait = 0; doubleWait < 5; doubleWait++) {
-              await this._wait(50);
+            for (let doubleWait = 0; doubleWait < maxDoubleWait; doubleWait++) {
+              await this._wait(pollInterval);
               const freshActions = getAvailableActions();
               if (freshActions.includes('double')) {
                 btnActs = freshActions;
                 foundDouble = true;
-                console.log('[SBJ DEBUG] Double button appeared after waiting');
+                console.log(`[SBJ DEBUG] Double button appeared after ${(doubleWait + 1) * pollInterval}ms`);
                 break;
               }
             }
 
-            if (!foundDouble) {
-              console.log('[SBJ DEBUG] Warning: Expected double button on 2-card hand but not found. Total:', v.total);
+            if (!foundDouble && (v.total === 11 || v.total === 10)) {
+              console.log(`[SBJ WARN] Double button NOT found for total ${v.total} after ${maxDoubleWait * pollInterval}ms - will fall back to hit`);
             }
           }
         }
@@ -2441,6 +2447,14 @@
         // Handle unavailable actions
         if (!gameActions.includes(decide)) {
           if (decide === 'double' && gameActions.includes('hit')) {
+            // BUG TRACKING: Alert if 11 doesn't get doubled (this should NEVER happen)
+            if (v.total === 11 && !v.soft && v.cardsRanks.length === 2) {
+              const bugMsg = `🚨 BUG: Hard 11 NOT DOUBLED! Cards: [${v.cardsRanks.join(',')}] vs ${v.upRank}. Available: [${gameActions.join(',')}]`;
+              console.error(bugMsg);
+              this._emit(bugMsg);
+              // Throw to make it very visible
+              throw new Error(bugMsg);
+            }
             decide = 'hit';
           } else if (decide === 'double' && gameActions.includes('stand')) {
             decide = 'stand';
