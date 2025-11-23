@@ -68,6 +68,23 @@
 
   function startNewHand(playerCards, dealerUp, betAmount = null) {
     _handCounter++;
+
+    // COMPARE to Stake UI at START of new hand (gives Stake time to update from previous hand)
+    // Only compare if we have previous hands to compare
+    if (runningStats.totalHands > 0) {
+      const stakeNetEl = document.querySelector('[data-testid="bets-stats-profit"]');
+      const stakeWagerEl = document.querySelector('[data-testid="bets-stats-wagered"]');
+      const stakeNet = stakeNetEl ? parseFloat(stakeNetEl.textContent.replace(/,/g, '')) : null;
+      const stakeWager = stakeWagerEl ? parseFloat(stakeWagerEl.textContent.replace(/,/g, '')) : null;
+      const runningNet = runningStats.totalWon - runningStats.totalBet;
+
+      const wagerDiff = stakeWager !== null ? (runningStats.totalBet - stakeWager).toFixed(2) : '?';
+      const netDiff = stakeNet !== null ? (runningNet - stakeNet).toFixed(2) : '?';
+
+      console.log('[SBJ COMPARE] OurWager:', runningStats.totalBet.toFixed(2), 'StakeWager:', stakeWager, 'Diff:', wagerDiff,
+        '| OurNet:', runningNet.toFixed(2), 'StakeNet:', stakeNet, 'Diff:', netDiff);
+    }
+
     // Try to extract bet amount from UI first, then server state, then default
     if (!betAmount) {
       betAmount = getBetAmountFromUI();
@@ -509,21 +526,12 @@
       runningStats.totalBet += actualBetAmount;
       runningStats.totalWon += winAmount;
 
-      // NET GAIN TRACKING: Log comparison between our calc and server
+      // NET GAIN TRACKING: Log hand result (comparison moved to startNewHand for accuracy)
       const ourNet = winAmount - actualBetAmount;
       const serverNet = (typeof serverPayoutNum === 'number' && !isNaN(serverPayoutNum))
         ? serverPayoutNum - actualBetAmount
         : 'unknown';
       const runningNet = runningStats.totalWon - runningStats.totalBet;
-
-      // Read Stake's official UI stats for comparison
-      const stakeNetEl = document.querySelector('[data-testid="bets-stats-profit"]');
-      const stakeWagerEl = document.querySelector('[data-testid="bets-stats-wagered"]');
-      const stakeNet = stakeNetEl ? parseFloat(stakeNetEl.textContent.replace(/,/g, '')) : null;
-      const stakeWager = stakeWagerEl ? parseFloat(stakeWagerEl.textContent.replace(/,/g, '')) : null;
-
-      const wagerDiff = stakeWager !== null ? (runningStats.totalBet - stakeWager).toFixed(2) : '?';
-      const netDiff = stakeNet !== null ? (runningNet - stakeNet).toFixed(2) : '?';
 
       console.log('[SBJ NET] Hand:', currentHand.playerStart, 'vs', currentHand.dealerUp,
         '| Result:', result,
@@ -532,8 +540,6 @@
         '| OurNet:', ourNet.toFixed(2),
         '| ServerNet:', typeof serverNet === 'number' ? serverNet.toFixed(2) : serverNet,
         '| RunningNet:', runningNet.toFixed(2));
-      console.log('[SBJ COMPARE] OurWager:', runningStats.totalBet.toFixed(2), 'StakeWager:', stakeWager, 'Diff:', wagerDiff,
-        '| OurNet:', runningNet.toFixed(2), 'StakeNet:', stakeNet, 'Diff:', netDiff);
 
       // Update total win display
       SBJ._updateTotalWin();
