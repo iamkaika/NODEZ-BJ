@@ -69,12 +69,12 @@
   let _lastFinishedTime = 0;
 
   function startNewHand(playerCards, dealerUp, betAmount = null) {
-    // DEDUP: Check if this matches a recently finished hand (within 1.5 seconds)
+    // DEDUP: Check if this matches a recently finished hand (within 3 seconds)
     // This catches the case where a hand "finishes" prematurely during multi-hit sequences
     const handKey = playerCards.slice(0, 2).join(',') + ' vs ' + dealerUp; // Use first 2 cards only
     const now = Date.now();
     const timeSinceFinish = now - _lastFinishedTime;
-    if (_lastFinishedHandKey && handKey === _lastFinishedHandKey && timeSinceFinish < 1500) {
+    if (_lastFinishedHandKey && handKey === _lastFinishedHandKey && timeSinceFinish < 3000) {
       // Only log once per second to avoid spam
       if (timeSinceFinish < 100 || timeSinceFinish > 1000) {
         console.warn('[SBJ WARNING] Duplicate hand start blocked:', handKey, '(finished', timeSinceFinish, 'ms ago)');
@@ -542,7 +542,7 @@
       const currentHandKey = startCards + ' vs ' + currentHand.dealerUp;
       const now = Date.now();
 
-      if (_lastFinishedHandKey === currentHandKey && (now - _lastFinishedTime) < 2000) {
+      if (_lastFinishedHandKey === currentHandKey && (now - _lastFinishedTime) < 3000) {
         console.warn('[SBJ WARNING] Duplicate bet blocked in finishHand:', currentHandKey, '(last finished', (now - _lastFinishedTime), 'ms ago)');
         // Still record the hand key/time to extend the dedup window
         _lastFinishedHandKey = currentHandKey;
