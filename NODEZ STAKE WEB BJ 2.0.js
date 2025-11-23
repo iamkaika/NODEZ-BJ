@@ -69,11 +69,16 @@
   let _lastFinishedTime = 0;
 
   function startNewHand(playerCards, dealerUp, betAmount = null) {
-    // DEDUP: Check if this matches a recently finished hand (within 5 seconds)
+    // DEDUP: Check if this matches a recently finished hand (within 1.5 seconds)
+    // This catches the case where a hand "finishes" prematurely during multi-hit sequences
     const handKey = playerCards.slice(0, 2).join(',') + ' vs ' + dealerUp; // Use first 2 cards only
     const now = Date.now();
-    if (_lastFinishedHandKey && handKey === _lastFinishedHandKey && (now - _lastFinishedTime) < 5000) {
-      console.warn('[SBJ WARNING] Duplicate hand start blocked:', handKey, '(finished', (now - _lastFinishedTime), 'ms ago)');
+    const timeSinceFinish = now - _lastFinishedTime;
+    if (_lastFinishedHandKey && handKey === _lastFinishedHandKey && timeSinceFinish < 1500) {
+      // Only log once per second to avoid spam
+      if (timeSinceFinish < 100 || timeSinceFinish > 1000) {
+        console.warn('[SBJ WARNING] Duplicate hand start blocked:', handKey, '(finished', timeSinceFinish, 'ms ago)');
+      }
       return; // Don't start a duplicate hand
     }
 
@@ -531,6 +536,20 @@
       }
 
       handHistory.push(currentHand);
+
+      // DEDUP CHECK: Don't double-count if we just finished same starting cards
+      const startCards = currentHand.playerStart.split(',').slice(0, 2).join(',');
+      const currentHandKey = startCards + ' vs ' + currentHand.dealerUp;
+      const now = Date.now();
+
+      if (_lastFinishedHandKey === currentHandKey && (now - _lastFinishedTime) < 2000) {
+        console.warn('[SBJ WARNING] Duplicate bet blocked in finishHand:', currentHandKey, '(last finished', (now - _lastFinishedTime), 'ms ago)');
+        // Still record the hand key/time to extend the dedup window
+        _lastFinishedHandKey = currentHandKey;
+        _lastFinishedTime = now;
+        currentHand = null;
+        return; // Skip counting - this is a duplicate
+      }
 
       // Update running totals for money-based RTP using the final bet amount
       runningStats.totalBet += actualBetAmount;
