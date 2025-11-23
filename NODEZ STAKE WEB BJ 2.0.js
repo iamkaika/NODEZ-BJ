@@ -65,8 +65,18 @@
   }
 
   let _handCounter = 0; // Unique hand counter to prevent ID collisions
+  let _lastFinishedHandKey = null; // Track last finished hand to prevent double-counting
+  let _lastFinishedTime = 0;
 
   function startNewHand(playerCards, dealerUp, betAmount = null) {
+    // DEDUP: Check if this matches a recently finished hand (within 5 seconds)
+    const handKey = playerCards.slice(0, 2).join(',') + ' vs ' + dealerUp; // Use first 2 cards only
+    const now = Date.now();
+    if (_lastFinishedHandKey && handKey === _lastFinishedHandKey && (now - _lastFinishedTime) < 5000) {
+      console.warn('[SBJ WARNING] Duplicate hand start blocked:', handKey, '(finished', (now - _lastFinishedTime), 'ms ago)');
+      return; // Don't start a duplicate hand
+    }
+
     _handCounter++;
 
     // COMPARE to Stake UI at START of new hand (gives Stake time to update from previous hand)
@@ -558,6 +568,11 @@
       if (handHistory.length > 50) {
         handHistory = handHistory.slice(-50);
       }
+
+      // DEDUP: Record this hand's key to prevent re-starting it
+      const startCards = currentHand.playerStart.split(',').slice(0, 2).join(',');
+      _lastFinishedHandKey = startCards + ' vs ' + currentHand.dealerUp;
+      _lastFinishedTime = Date.now();
 
       // Clear currentHand after using all its data
       currentHand = null;
